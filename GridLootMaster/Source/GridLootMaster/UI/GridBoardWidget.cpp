@@ -8,6 +8,8 @@
 #include "Components/BorderSlot.h"
 #include "Components/TextBlock.h"
 #include "DraggableItemWidget.h"
+#include "../GridGameMode.h"
+#include "Kismet/GameplayStatics.h"
 
 bool UGridBoardWidget::Initialize()
 {
@@ -64,10 +66,19 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
 
             if (InventoryComponent->CheckItemFit(ItemDropOp->ItemID, GridX, GridY, Width, Height))
             {
-                // 가방 안에서 가방 안으로 이동하는 경우를 위해, 기존 위치에서 먼저 제거합니다.
-                InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                // 드래그 전의 기존 위치에서 아이템 제거 (가방 -> 가방, 혹은 상자 -> 가방 이동 시 중복 방지)
+                AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+                if (GM)
+                {
+                    if (GM->InventoryComponent) GM->InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                    if (GM->LootContainerComponent) GM->LootContainerComponent->RemoveItem(ItemDropOp->ItemID);
+                }
+                else
+                {
+                    InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                }
                 
-                if (InventoryComponent->AddItem(ItemDropOp->ItemID, GridX, GridY, Width, Height, ItemDropOp->Rarity))
+                if (InventoryComponent->AddItem(ItemDropOp->ItemID, GridX, GridY, Width, Height, ItemDropOp->Rarity, true))
                 {
                     // 성공 시 원본 UI를 화면(대기열)에서 제거
                     if (ItemDropOp->OriginalWidget)
@@ -230,6 +241,14 @@ void UGridBoardWidget::RefreshGridUI()
                     SavedRarity = *FoundRarity;
                 }
                 ItemVisual->Rarity = SavedRarity;
+
+                // 식별(Examined) 상태 불러오기 (기본값 true)
+                bool bSavedExamined = true;
+                if (const bool* FoundExamined = InventoryComponent->ItemExaminedMap.Find(ItemID))
+                {
+                    bSavedExamined = *FoundExamined;
+                }
+                ItemVisual->bIsExamined = bSavedExamined;
 
                 // InitWidgetUI()를 호출하면 DraggableItemWidget 내부에서 텍스트와 배경이 세팅됨
                 ItemVisual->InitWidgetUI();

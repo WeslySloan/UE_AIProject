@@ -5,6 +5,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Components/SizeBox.h"
+#include "Components/ProgressBar.h"
 #include "Components/Border.h"
 #include "Components/BorderSlot.h"
 #include "Components/TextBlock.h"
@@ -39,23 +40,38 @@ void UDraggableItemWidget::InitWidgetUI()
             default:                     RarityColor = FLinearColor(0.3f, 0.3f, 0.3f, 1.0f); break;
         }
 
+        // 미식별 상태면 시커먼 실루엣(회색 틴트)으로 강제 덮어쓰기
+        if (!bIsExamined)
+        {
+            RarityColor = FLinearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        }
+
         // Delta Force 스타일처럼 짙은 반투명 회색 배경에 Rarity 색상을 약간 섞음
         FLinearColor DarkTint = FLinearColor(RarityColor.R * 0.3f, RarityColor.G * 0.3f, RarityColor.B * 0.3f, 0.85f);
         BG->SetBrushColor(DarkTint);
         RootBox->AddChild(BG);
         
+        // --- 텍스트 설정 ---
         UTextBlock* NameText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-        // 뒤에 붙는 _1234 고유번호를 잘라내고 원래 이름만 표시
         FString DisplayName = ItemID.ToString();
         int32 UnderscoreIdx;
         if (DisplayName.FindChar('_', UnderscoreIdx))
         {
             DisplayName = DisplayName.Left(UnderscoreIdx);
         }
-        NameText->SetText(FText::FromString(DisplayName));
         
-        // 텍스트 색상은 기존처럼 밝은 회색/흰색 고정
-        NameText->SetColorAndOpacity(FLinearColor(0.9f, 0.9f, 0.9f, 1.0f));
+        // 미식별 상태면 텍스트를 ??? 로 숨김
+        if (!bIsExamined)
+        {
+            DisplayName = TEXT("???");
+            NameText->SetColorAndOpacity(FLinearColor(0.5f, 0.5f, 0.5f, 1.0f)); // 어두운 회색 텍스트
+        }
+        else
+        {
+            NameText->SetColorAndOpacity(FLinearColor(0.9f, 0.9f, 0.9f, 1.0f)); // 밝은 흰색 텍스트
+        }
+
+        NameText->SetText(FText::FromString(DisplayName));
         NameText->Font.Size = 12;
         NameText->SetShadowOffset(FVector2D(1.0f, 1.0f));
         NameText->SetShadowColorAndOpacity(FLinearColor::Black);
@@ -65,7 +81,22 @@ void UDraggableItemWidget::InitWidgetUI()
         {
             TextSlot->SetHorizontalAlignment(HAlign_Left);
             TextSlot->SetVerticalAlignment(VAlign_Top);
-            TextSlot->SetPadding(FMargin(4.0f, 2.0f, 0.0f, 0.0f)); // 모서리에서 살짝 떨어지게
+            TextSlot->SetPadding(FMargin(4.0f, 2.0f, 0.0f, 0.0f));
+        }
+
+        // --- 프로그레스 바 (식별 중 표시용) ---
+        ExamineProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass());
+        ExamineProgressBar->SetVisibility(ESlateVisibility::Hidden); // 기본 숨김
+        ExamineProgressBar->SetPercent(0.0f);
+        ExamineProgressBar->WidgetStyle.FillImage.TintColor = FLinearColor::White;
+        
+        // 프로그레스 바를 하단에 배치
+        if (UBorderSlot* ProgressSlot = Cast<UBorderSlot>(BG->AddChild(ExamineProgressBar)))
+        {
+            ProgressSlot->SetHorizontalAlignment(HAlign_Fill);
+            ProgressSlot->SetVerticalAlignment(VAlign_Bottom);
+            ProgressSlot->SetPadding(FMargin(4.0f, 0.0f, 4.0f, 4.0f));
+            // 높이 강제 조정 (UProgressBar 자체 속성 조절이 한계가 있으면 슬롯 단위에서 패딩으로 해결하거나 사이즈박스로 감싸야함)
         }
     }
 }
@@ -79,6 +110,12 @@ FReply UDraggableItemWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry
 void UDraggableItemWidget::NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation)
 {
     Super::NativeOnDragDetected(InGeometry, InMouseEvent, OutOperation);
+
+    // 미식별 상태면 드래그 불가
+    if (!bIsExamined)
+    {
+        return;
+    }
 
     UItemDragDropOperation* DragDropOp = NewObject<UItemDragDropOperation>();
     DragDropOp->ItemID = this->ItemID;

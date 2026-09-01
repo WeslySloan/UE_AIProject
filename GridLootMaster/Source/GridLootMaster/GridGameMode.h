@@ -43,22 +43,36 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Game")
     void CheckWinCondition();
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
     class UGridInventoryComponent* InventoryComponent;
 
+    // 루트 컨테이너용 인벤토리 컴포넌트 추가
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+    class UGridInventoryComponent* LootContainerComponent;
+
+    // [탐색] 버튼을 눌렀을 때 서칭 시퀀스 시작
+    UFUNCTION()
+    void StartContainerSearch();
+
+protected:
     UPROPERTY()
     class UMainGameUI* MainUI;
 
-    // 아이템 스폰 딜레이 (초)
-    float SpawnDelay = 2.0f;
-    FTimerHandle SpawnTimerHandle;
+    FTimerHandle GameTimerHandle;
+
+    // 서칭 페이즈 타이머
+    FTimerHandle SearchPhaseTimer;
+    FTimerHandle ExamineTimer;
+    
+    // 식별 대기열
+    TArray<FName> ItemsToExamine;
 
     UFUNCTION()
-    void SpawnRandomItem();
-
-protected:
-    // 1초마다 타이머 감소
     void GameTimerUpdate();
 
-    FTimerHandle GameTimerHandle;
+    UFUNCTION()
+    void OnSearchPhaseComplete(); // 1초 분석 후 실루엣 생성
+
+    UFUNCTION()
+    void ProcessNextExamine(); // 0.5초마다 아이템 1개씩 식별 완료 처리
 };

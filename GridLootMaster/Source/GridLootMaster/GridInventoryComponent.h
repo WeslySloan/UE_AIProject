@@ -50,13 +50,17 @@ public:
     UPROPERTY()
     TMap<FName, EItemRarity> ItemRarityMap;
 
+    // 배치된 아이템들의 식별(Examined) 여부를 기억하기 위한 맵
+    UPROPERTY()
+    TMap<FName, bool> ItemExaminedMap;
+
     // 해당 위치에 아이템을 배치할 수 있는지 확인합니다.
     UFUNCTION(BlueprintCallable, Category = "Inventory")
     bool CheckItemFit(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight) const;
 
     // 아이템을 배치합니다. (성공 시 true 반환)
     UFUNCTION(BlueprintCallable, Category = "Inventory")
-    bool AddItem(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight, EItemRarity Rarity = EItemRarity::Common);
+    bool AddItem(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight, EItemRarity Rarity = EItemRarity::Common, bool bIsExamined = true);
 
     // 아이템을 인벤토리에서 제거합니다.
     UFUNCTION(BlueprintCallable, Category = "Inventory")

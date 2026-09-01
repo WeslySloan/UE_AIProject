@@ -64,7 +64,7 @@ bool UGridInventoryComponent::CheckItemFit(FName ItemID, int32 StartX, int32 Sta
     return true;
 }
 
-bool UGridInventoryComponent::AddItem(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight, EItemRarity Rarity)
+bool UGridInventoryComponent::AddItem(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight, EItemRarity Rarity, bool bIsExamined)
 {
     if (!CheckItemFit(ItemID, StartX, StartY, ItemWidth, ItemHeight))
     {
@@ -83,8 +83,9 @@ bool UGridInventoryComponent::AddItem(FName ItemID, int32 StartX, int32 StartY, 
         }
     }
 
-    // 아이템 희귀도 기억
+    // 아이템 희귀도 및 식별 상태 기억
     ItemRarityMap.Add(ItemID, Rarity);
+    ItemExaminedMap.Add(ItemID, bIsExamined);
 
     OnInventoryChanged.Broadcast();
     return true;
@@ -105,6 +106,7 @@ void UGridInventoryComponent::RemoveItem(FName ItemID)
     if (bRemoved)
     {
         ItemRarityMap.Remove(ItemID);
+        ItemExaminedMap.Remove(ItemID);
         OnInventoryChanged.Broadcast();
     }
 }
@@ -116,5 +118,6 @@ void UGridInventoryComponent::ClearInventory()
         GridCells[i] = NAME_None;
     }
     ItemRarityMap.Empty();
+    ItemExaminedMap.Empty();
     OnInventoryChanged.Broadcast();
 }

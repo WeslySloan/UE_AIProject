@@ -25,8 +25,15 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
     EItemRarity Rarity;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
+    bool bIsExamined = true;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item State")
     bool bIsRotated = false;
+
+    // 프로그레스 바 포인터 (선택적)
+    UPROPERTY()
+    class UProgressBar* ExamineProgressBar;
 
     // 현재 진행 중인 드래그 오퍼레이션을 추적하여 회전 시 값 갱신
     UPROPERTY()

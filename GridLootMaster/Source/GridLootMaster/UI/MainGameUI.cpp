@@ -57,15 +57,26 @@ bool UMainGameUI::Initialize()
         SpacerSlot1->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
         SpacerSlot1->SetPadding(FMargin(0, 20));
 
-        // 대기열 제목
+        // 대기열 제목 -> 컨테이너 제목으로 변경
         UTextBlock* PoolTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-        PoolTitle->SetText(FText::FromString(TEXT("Loot Pool (Drag items to bag)")));
+        PoolTitle->SetText(FText::FromString(TEXT("Loot Container")));
         LeftPanel->AddChildToVerticalBox(PoolTitle);
 
-        // Loot Pool (WrapBox)
-        LootPoolBox = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), TEXT("LootPoolBox"));
-        UVerticalBoxSlot* PoolSlot = LeftPanel->AddChildToVerticalBox(LootPoolBox);
+        // 새로운 컨테이너 그리드 
+        ContainerBoard = WidgetTree->ConstructWidget<UGridBoardWidget>(UGridBoardWidget::StaticClass(), TEXT("ContainerBoard"));
+        UVerticalBoxSlot* PoolSlot = LeftPanel->AddChildToVerticalBox(ContainerBoard);
         PoolSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill)); // 남은 공간 모두 차지
+
+        // [Search Container] 버튼
+        SearchBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SearchBtn"));
+        UTextBlock* SearchBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        SearchBtnText->SetText(FText::FromString(TEXT("SEARCH CONTAINER")));
+        SearchBtnText->SetColorAndOpacity(FLinearColor::Black);
+        SearchBtn->AddChild(SearchBtnText);
+        // OnClicked는 GridGameMode가 연결될 때 바인딩하거나 여기서 바인딩
+        UVerticalBoxSlot* SearchSlot = LeftPanel->AddChildToVerticalBox(SearchBtn);
+        SearchSlot->SetPadding(FMargin(0, 10, 0, 0));
+        SearchSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
 
         // Sell Button
         UButton* SellBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellButton"));
@@ -86,13 +97,25 @@ bool UMainGameUI::Initialize()
 
         // 게임모드에서 인벤토리 컴포넌트 연결
         AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
-        if (GM && GM->InventoryComponent)
+        if (GM)
         {
-            GridBoard->InventoryComponent = GM->InventoryComponent;
-            GM->InventoryComponent->OnInventoryChanged.AddDynamic(GridBoard, &UGridBoardWidget::RefreshGridUI);
-            
-            // 초기 빈 그리드 표시를 위해 수동으로 한 번 호출
-            GridBoard->RefreshGridUI();
+            if (GM->InventoryComponent)
+            {
+                GridBoard->InventoryComponent = GM->InventoryComponent;
+                GM->InventoryComponent->OnInventoryChanged.AddDynamic(GridBoard, &UGridBoardWidget::RefreshGridUI);
+                GridBoard->RefreshGridUI();
+            }
+
+            if (GM->LootContainerComponent)
+            {
+                ContainerBoard->InventoryComponent = GM->LootContainerComponent;
+                // 컨테이너는 루트용이므로 가방과 다르게 표시할 수 있다면 좋지만, 일단 동일한 그리드 UI 공유
+                GM->LootContainerComponent->OnInventoryChanged.AddDynamic(ContainerBoard, &UGridBoardWidget::RefreshGridUI);
+                ContainerBoard->RefreshGridUI();
+            }
+
+            // 서치 버튼 바인딩
+            SearchBtn->OnClicked.AddDynamic(GM, &AGridGameMode::StartContainerSearch);
         }
     }
     return true;
@@ -121,29 +144,6 @@ void UMainGameUI::ShowGameResult(bool bIsWin)
         FString ResultStr = bIsWin ? TEXT("YOU WIN!") : TEXT("GAME OVER!");
         TimerText->SetText(FText::FromString(ResultStr));
         TimerText->SetColorAndOpacity(bIsWin ? FLinearColor::Green : FLinearColor::Red);
-    }
-}
-
-void UMainGameUI::AddItemToLootPool(FName ItemID, FIntPoint Size, int32 Value, EItemRarity Rarity)
-{
-    if (!LootPoolBox) return;
-
-    UDraggableItemWidget* NewItem = WidgetTree->ConstructWidget<UDraggableItemWidget>(UDraggableItemWidget::StaticClass());
-    if (NewItem)
-    {
-        NewItem->ItemID = ItemID;
-        NewItem->ItemSize = Size;
-        NewItem->Value = Value;
-        NewItem->Rarity = Rarity;
-        
-        NewItem->InitWidgetUI();
-            
-        if (UWrapBoxSlot* WrapSlot = Cast<UWrapBoxSlot>(LootPoolBox->AddChildToWrapBox(NewItem)))
-        {
-            WrapSlot->SetPadding(FMargin(5.0f));
-            WrapSlot->SetHorizontalAlignment(HAlign_Left);
-            WrapSlot->SetVerticalAlignment(VAlign_Top);
-        }
     }
 }
 

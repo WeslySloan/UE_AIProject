@@ -23,14 +23,9 @@ public:
     UFUNCTION()
     void UpdateTimer(float RemainingTime);
 
-    UFUNCTION()
+    UFUNCTION(BlueprintCallable, Category = "Game")
     void ShowGameResult(bool bIsWin);
 
-    // 새 아이템을 Loot Pool에 추가 (UI 생성)
-    UFUNCTION()
-    void AddItemToLootPool(FName ItemID, FIntPoint Size, int32 Value, EItemRarity Rarity = EItemRarity::Common);
-
-    // Sell 버튼 클릭 시
     UFUNCTION()
     void OnSellButtonClicked();
 
@@ -41,9 +36,14 @@ public:
     UPROPERTY()
     UTextBlock* TimerText;
 
+    // 기존의 UWrapBox 대신 새로운 루트 컨테이너용 그리드 보드 사용
     UPROPERTY()
-    UWrapBox* LootPoolBox;
+    UGridBoardWidget* ContainerBoard;
 
     UPROPERTY()
     UGridBoardWidget* GridBoard;
+
+    // 상자 뒤지기(탐색) 버튼
+    UPROPERTY()
+    class UButton* SearchBtn;
 };
