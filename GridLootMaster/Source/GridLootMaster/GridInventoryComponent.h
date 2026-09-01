@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "ItemData.h"
 #include "GridInventoryComponent.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnInventoryChanged);
@@ -45,13 +46,17 @@ public:
     // 2D 좌표를 1D 인덱스로 변환
     int32 GetIndex(int32 X, int32 Y) const;
 
+    // 배치된 아이템들의 Rarity를 기억하기 위한 맵
+    UPROPERTY()
+    TMap<FName, EItemRarity> ItemRarityMap;
+
     // 해당 위치에 아이템을 배치할 수 있는지 확인합니다.
     UFUNCTION(BlueprintCallable, Category = "Inventory")
     bool CheckItemFit(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight) const;
 
     // 아이템을 배치합니다. (성공 시 true 반환)
     UFUNCTION(BlueprintCallable, Category = "Inventory")
-    bool AddItem(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight);
+    bool AddItem(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight, EItemRarity Rarity = EItemRarity::Common);
 
     // 아이템을 인벤토리에서 제거합니다.
     UFUNCTION(BlueprintCallable, Category = "Inventory")

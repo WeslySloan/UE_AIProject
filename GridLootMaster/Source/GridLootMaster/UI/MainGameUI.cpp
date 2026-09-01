@@ -124,24 +124,25 @@ void UMainGameUI::ShowGameResult(bool bIsWin)
     }
 }
 
-void UMainGameUI::AddItemToLootPool(FName ItemID, FIntPoint Size, int32 Value)
+void UMainGameUI::AddItemToLootPool(FName ItemID, FIntPoint Size, int32 Value, EItemRarity Rarity)
 {
-    if (LootPoolBox)
+    if (!LootPoolBox) return;
+
+    UDraggableItemWidget* NewItem = WidgetTree->ConstructWidget<UDraggableItemWidget>(UDraggableItemWidget::StaticClass());
+    if (NewItem)
     {
-        UDraggableItemWidget* NewItem = CreateWidget<UDraggableItemWidget>(this, UDraggableItemWidget::StaticClass());
-        if (NewItem)
-        {
-            NewItem->ItemID = ItemID;
-            NewItem->ItemSize = Size;
-            NewItem->Value = Value;
-            NewItem->InitWidgetUI();
+        NewItem->ItemID = ItemID;
+        NewItem->ItemSize = Size;
+        NewItem->Value = Value;
+        NewItem->Rarity = Rarity;
+        
+        NewItem->InitWidgetUI();
             
-            if (UWrapBoxSlot* WrapSlot = Cast<UWrapBoxSlot>(LootPoolBox->AddChildToWrapBox(NewItem)))
-            {
-                WrapSlot->SetPadding(FMargin(5.0f));
-                WrapSlot->SetHorizontalAlignment(HAlign_Left);
-                WrapSlot->SetVerticalAlignment(VAlign_Top);
-            }
+        if (UWrapBoxSlot* WrapSlot = Cast<UWrapBoxSlot>(LootPoolBox->AddChildToWrapBox(NewItem)))
+        {
+            WrapSlot->SetPadding(FMargin(5.0f));
+            WrapSlot->SetHorizontalAlignment(HAlign_Left);
+            WrapSlot->SetVerticalAlignment(VAlign_Top);
         }
     }
 }

@@ -62,15 +62,21 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
             int32 Width = ItemDropOp->bIsRotated ? ItemDropOp->ItemSize.Y : ItemDropOp->ItemSize.X;
             int32 Height = ItemDropOp->bIsRotated ? ItemDropOp->ItemSize.X : ItemDropOp->ItemSize.Y;
 
-            if (InventoryComponent->AddItem(ItemDropOp->ItemID, GridX, GridY, Width, Height))
+            if (InventoryComponent->CheckItemFit(ItemDropOp->ItemID, GridX, GridY, Width, Height))
             {
-                // 성공 시 원본 UI를 화면(대기열)에서 제거
-                if (ItemDropOp->OriginalWidget)
+                // 가방 안에서 가방 안으로 이동하는 경우를 위해, 기존 위치에서 먼저 제거합니다.
+                InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                
+                if (InventoryComponent->AddItem(ItemDropOp->ItemID, GridX, GridY, Width, Height, ItemDropOp->Rarity))
                 {
-                    ItemDropOp->OriginalWidget->RemoveFromParent();
+                    // 성공 시 원본 UI를 화면(대기열)에서 제거
+                    if (ItemDropOp->OriginalWidget)
+                    {
+                        ItemDropOp->OriginalWidget->RemoveFromParent();
+                    }
+                    RefreshGridUI();
+                    return true;
                 }
-                RefreshGridUI();
-                return true;
             }
         }
     }
@@ -212,37 +218,30 @@ void UGridBoardWidget::RefreshGridUI()
                 int32 ItemW = MaxX - MinX + 1;
                 int32 ItemH = MaxY - MinY + 1;
 
-                UBorder* ItemVisual = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-                // Delta Force 스타일처럼 짙은 반투명 회색 적용 (드래그 아이템과 동일한 느낌)
-                ItemVisual->SetBrushColor(FLinearColor(0.2f, 0.2f, 0.2f, 0.7f));
-                ItemVisual->SetVisibility(ESlateVisibility::HitTestInvisible); 
+                UDraggableItemWidget* ItemVisual = WidgetTree->ConstructWidget<UDraggableItemWidget>(UDraggableItemWidget::StaticClass());
+                ItemVisual->ItemID = ItemID;
+                ItemVisual->ItemSize = FIntPoint(ItemW, ItemH);
+                ItemVisual->bIsRotated = false; // 그리드 내의 현재 모양을 기본 모양으로 취급
                 
-                // 텍스트 추가
-                UTextBlock* NameText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-                FString DisplayName = ItemID.ToString();
-                int32 UnderscoreIdx;
-                if (DisplayName.FindChar('_', UnderscoreIdx))
+                // 저장된 희귀도 불러오기 (기본값 Common)
+                EItemRarity SavedRarity = EItemRarity::Common;
+                if (const EItemRarity* FoundRarity = InventoryComponent->ItemRarityMap.Find(ItemID))
                 {
-                    DisplayName = DisplayName.Left(UnderscoreIdx);
+                    SavedRarity = *FoundRarity;
                 }
-                NameText->SetText(FText::FromString(DisplayName));
-                NameText->SetColorAndOpacity(FLinearColor(0.9f, 0.9f, 0.9f, 1.0f));
-                NameText->Font.Size = 12;
-                NameText->SetShadowOffset(FVector2D(1.0f, 1.0f));
-                NameText->SetShadowColorAndOpacity(FLinearColor::Black);
+                ItemVisual->Rarity = SavedRarity;
+
+                // InitWidgetUI()를 호출하면 DraggableItemWidget 내부에서 텍스트와 배경이 세팅됨
+                ItemVisual->InitWidgetUI();
                 
-                if (UBorderSlot* TextSlot = Cast<UBorderSlot>(ItemVisual->AddChild(NameText)))
-                {
-                    TextSlot->SetHorizontalAlignment(HAlign_Left);
-                    TextSlot->SetVerticalAlignment(VAlign_Top);
-                    TextSlot->SetPadding(FMargin(4.0f, 2.0f, 0.0f, 0.0f));
-                }
+                // 가방 내부에서도 클릭하여 드래그할 수 있도록 Visible로 설정 (기본이 Visible)
+                ItemVisual->SetVisibility(ESlateVisibility::Visible);
 
                 UCanvasPanelSlot* CanvasSlot = GridCanvas->AddChildToCanvas(ItemVisual);
                 
-                // 외곽선(그리드 선)을 가리지 않도록 위치와 크기에 약간의 마진 부여
-                CanvasSlot->SetPosition(FVector2D(MinX * 64.0f + 2.0f, MinY * 64.0f + 2.0f));
-                CanvasSlot->SetSize(FVector2D(ItemW * 64.0f - 4.0f, ItemH * 64.0f - 4.0f)); 
+                // 위치와 크기를 64배수로 딱 맞추어 드래그 시 좌표 오차가 없도록 함
+                CanvasSlot->SetPosition(FVector2D(MinX * 64.0f, MinY * 64.0f));
+                CanvasSlot->SetAutoSize(true); // DraggableItem 내부의 SizeBox에 크기를 위임
             }
         }
     }

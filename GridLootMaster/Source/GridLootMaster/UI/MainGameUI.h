@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "../ItemData.h"
 #include "MainGameUI.generated.h"
 
 class UTextBlock;
@@ -27,7 +28,7 @@ public:
 
     // 새 아이템을 Loot Pool에 추가 (UI 생성)
     UFUNCTION()
-    void AddItemToLootPool(FName ItemID, FIntPoint Size, int32 Value);
+    void AddItemToLootPool(FName ItemID, FIntPoint Size, int32 Value, EItemRarity Rarity = EItemRarity::Common);
 
     // Sell 버튼 클릭 시
     UFUNCTION()

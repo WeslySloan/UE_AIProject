@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/DragDropOperation.h"
+#include "../ItemData.h"
 #include "ItemDragDropOperation.generated.h"
 
 UCLASS()
@@ -15,8 +16,11 @@ public:
     FName ItemID;
 
     // 드래그 중인 아이템의 원래 크기
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag Drop", meta = (ExposeOnSpawn = "true"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
     FIntPoint ItemSize;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
+    EItemRarity Rarity;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag Drop")
     bool bIsRotated = false;

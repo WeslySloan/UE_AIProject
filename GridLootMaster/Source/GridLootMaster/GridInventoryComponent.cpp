@@ -64,26 +64,30 @@ bool UGridInventoryComponent::CheckItemFit(FName ItemID, int32 StartX, int32 Sta
     return true;
 }
 
-bool UGridInventoryComponent::AddItem(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight)
+bool UGridInventoryComponent::AddItem(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight, EItemRarity Rarity)
 {
-    if (CheckItemFit(ItemID, StartX, StartY, ItemWidth, ItemHeight))
+    if (!CheckItemFit(ItemID, StartX, StartY, ItemWidth, ItemHeight))
     {
-        for (int32 X = StartX; X < StartX + ItemWidth; ++X)
+        return false;
+    }
+
+    for (int32 X = StartX; X < StartX + ItemWidth; ++X)
+    {
+        for (int32 Y = StartY; Y < StartY + ItemHeight; ++Y)
         {
-            for (int32 Y = StartY; Y < StartY + ItemHeight; ++Y)
+            int32 Index = GetIndex(X, Y);
+            if (IsValidIndex(Index))
             {
-                int32 Index = GetIndex(X, Y);
-                if (IsValidIndex(Index))
-                {
-                    GridCells[Index] = ItemID;
-                }
+                GridCells[Index] = ItemID;
             }
         }
-        
-        OnInventoryChanged.Broadcast();
-        return true;
     }
-    return false;
+
+    // 아이템 희귀도 기억
+    ItemRarityMap.Add(ItemID, Rarity);
+
+    OnInventoryChanged.Broadcast();
+    return true;
 }
 
 void UGridInventoryComponent::RemoveItem(FName ItemID)
@@ -100,6 +104,7 @@ void UGridInventoryComponent::RemoveItem(FName ItemID)
 
     if (bRemoved)
     {
+        ItemRarityMap.Remove(ItemID);
         OnInventoryChanged.Broadcast();
     }
 }
@@ -110,5 +115,6 @@ void UGridInventoryComponent::ClearInventory()
     {
         GridCells[i] = NAME_None;
     }
+    ItemRarityMap.Empty();
     OnInventoryChanged.Broadcast();
 }

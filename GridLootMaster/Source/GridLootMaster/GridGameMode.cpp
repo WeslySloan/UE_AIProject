@@ -50,17 +50,28 @@ void AGridGameMode::SpawnRandomItem()
     if (!MainUI) return;
 
     // 더미 아이템 데이터 목록
-    TArray<FName> Names = { TEXT("Sword"), TEXT("Shield"), TEXT("Potion"), TEXT("Axe"), TEXT("Gem") };
+    static const FName Names[] = { TEXT("Sword"), TEXT("Shield"), TEXT("Potion"), TEXT("Axe"), TEXT("Gem"), TEXT("Diamond") };
     // 기본적으로 최대한 가로로 표시되도록 세로로 긴 아이템들을 가로로 눕혀서 스폰합니다.
-    TArray<FIntPoint> Sizes = { FIntPoint(3,1), FIntPoint(2,2), FIntPoint(1,1), FIntPoint(3,2), FIntPoint(2,1) };
+    static const FIntPoint Sizes[] = { FIntPoint(3, 1), FIntPoint(2, 2), FIntPoint(1, 1), FIntPoint(3, 2), FIntPoint(1, 1), FIntPoint(1, 1) };
+    static const EItemRarity Rarities[] = { 
+        EItemRarity::Common,    // Sword (노말)
+        EItemRarity::Uncommon,  // Shield 
+        EItemRarity::Common,    // Potion
+        EItemRarity::Legendary, // Axe (골드)
+        EItemRarity::Rare,      // Gem (레어)
+        EItemRarity::Mythic     // Diamond (레드)
+    };
     
-    int32 RandIdx = FMath::RandRange(0, Names.Num() - 1);
+    int32 RandIdx = FMath::RandRange(0, 5);
     
     // 고유 ID 생성 (예: Sword_1234)
     static int32 SpawnCounter = 0;
     FString UniqueName = FString::Printf(TEXT("%s_%d"), *Names[RandIdx].ToString(), SpawnCounter++);
     
-    MainUI->AddItemToLootPool(FName(*UniqueName), Sizes[RandIdx], (Sizes[RandIdx].X * Sizes[RandIdx].Y) * 10);
+    // 배열에 지정된 고정된 희귀도 사용
+    EItemRarity FixedRarity = Rarities[RandIdx];
+
+    MainUI->AddItemToLootPool(FName(*UniqueName), Sizes[RandIdx], (Sizes[RandIdx].X * Sizes[RandIdx].Y) * 10, FixedRarity);
 }
 
 void AGridGameMode::GameTimerUpdate()

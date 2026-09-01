@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "../ItemData.h"
 #include "DraggableItemWidget.generated.h"
 
 UCLASS()
@@ -21,12 +22,19 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
     int32 Value;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
+    EItemRarity Rarity;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item State")
     bool bIsRotated = false;
 
     // 현재 진행 중인 드래그 오퍼레이션을 추적하여 회전 시 값 갱신
     UPROPERTY()
     class UItemDragDropOperation* CurrentDragOp;
+
+    // 현재 드래그 중인 비주얼을 추적하여 회전 시 비주얼 갱신
+    UPROPERTY()
+    UDraggableItemWidget* CurrentDragVisual;
 
     UFUNCTION()
     void InitWidgetUI();
