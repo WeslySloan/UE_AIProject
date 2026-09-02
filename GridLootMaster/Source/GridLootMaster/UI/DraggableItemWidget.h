@@ -5,6 +5,8 @@
 #include "../ItemData.h"
 #include "DraggableItemWidget.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnItemRightClicked, class UItemInstance*, ItemObj);
+
 UCLASS()
 class GRIDLOOTMASTER_API UDraggableItemWidget : public UUserWidget
 {
@@ -13,23 +15,19 @@ class GRIDLOOTMASTER_API UDraggableItemWidget : public UUserWidget
 public:
     virtual void NativeConstruct() override;
 
+public:
+    // 참조하는 아이템 인스턴스 (데이터 소스)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
-    FName ItemID;
+    class UItemInstance* ItemObj;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
-    FIntPoint ItemSize;
+    UPROPERTY(BlueprintReadWrite, Category = "Inventory")
+    class UGridInventoryComponent* SourceInventory;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
-    int32 Value;
+    UPROPERTY(BlueprintAssignable, Category = "Item")
+    FOnItemRightClicked OnRightClicked;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
-    EItemRarity Rarity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
-    bool bIsExamined = true;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item State")
-    bool bIsRotated = false;
+    UFUNCTION(BlueprintCallable, Category = "Item")
+    void InitWidgetUI(bool bEquipped = false);
 
     // 프로그레스 바 포인터 (선택적)
     UPROPERTY()
@@ -43,17 +41,28 @@ public:
     UPROPERTY()
     UDraggableItemWidget* CurrentDragVisual;
 
-    UFUNCTION()
-    void InitWidgetUI();
 
 protected:
     virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+    virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual void NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation) override;
     
     // 키보드 입력을 받을 수 있도록 포커스 가능 상태로 설정
     virtual bool NativeSupportsKeyboardFocus() const override { return true; }
 
     virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+
+    UFUNCTION()
+    void OnAutoSplitConfirmed(int32 SplitAmount);
+
+    UFUNCTION()
+    void HandleInspectItem(class UItemInstance* TargetItem);
+
+    UFUNCTION()
+    void HandleDiscardItem(class UItemInstance* TargetItem);
+
+    UFUNCTION()
+    void HandleUnloadItem(class UItemInstance* TargetItem);
 
     // 회전 상태가 변경되었을 때 블루프린트에서 비주얼을 업데이트
     UFUNCTION(BlueprintImplementableEvent, Category = "Item UI")

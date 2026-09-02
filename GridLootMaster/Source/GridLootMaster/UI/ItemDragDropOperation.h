@@ -16,19 +16,18 @@ public:
     FName ItemID;
 
     // 드래그 중인 아이템의 원래 크기
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
-    FIntPoint ItemSize;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag and Drop")
+    class UItemInstance* ItemObj;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data", meta = (ExposeOnSpawn = "true"))
-    EItemRarity Rarity;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag Drop")
-    bool bIsRotated = false;
-    
-    UPROPERTY()
-    class UWidget* OriginalWidget;
-
-    // 드래그 시작 시, 아이템의 왼쪽 상단(Top-Left)을 기준으로 한 마우스의 위치 오프셋
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag Drop")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag and Drop")
     FVector2D MouseOffset;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag and Drop")
+    class UDraggableItemWidget* OriginalWidget;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag and Drop")
+    bool bIsSplitDrag = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag and Drop")
+    class UGridInventoryComponent* SourceInventory = nullptr;
 };

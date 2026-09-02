@@ -1,0 +1,178 @@
+Created At: 2026-09-02T20:49:49+09:00
+Completed At: 2026-09-02T20:49:49+09:00
+File Path: `file:///c:/Users/rkc32/OneDrive/Desktop/GITHUB/UE_AIProject/GridLootMaster/Source/GridLootMaster/UI/MainGameUI.cpp`
+Total Lines: 170
+Total Bytes: 7755
+Showing lines 1 to 170
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: #include "MainGameUI.h"
+2: #include "Blueprint/WidgetTree.h"
+3: #include "Components/CanvasPanel.h"
+4: #include "Components/CanvasPanelSlot.h"
+5: #include "Components/TextBlock.h"
+6: #include "Components/Button.h"
+7: #include "Components/WrapBox.h"
+8: #include "Components/WrapBoxSlot.h"
+9: #include "Components/Border.h"
+10: #include "Components/HorizontalBox.h"
+11: #include "Components/HorizontalBoxSlot.h"
+12: #include "Components/VerticalBox.h"
+13: #include "Components/VerticalBoxSlot.h"
+14: #include "GridBoardWidget.h"
+15: #include "DraggableItemWidget.h"
+16: #include "../GridGameMode.h"
+17: #include "../GridInventoryComponent.h"
+18: #include "Kismet/GameplayStatics.h"
+19: 
+20: bool UMainGameUI::Initialize()
+21: {
+22:     if (!Super::Initialize()) return false;
+23: 
+24:     if (WidgetTree && !WidgetTree->RootWidget)
+25:     {
+26:         // 1. Root: Canvas Panel
+27:         UCanvasPanel* RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RootCanvas"));
+28:         WidgetTree->RootWidget = RootCanvas;
+29: 
+30:         // 2. 전체 레이아웃 (가로 2분할: 왼쪽(LootPool/상태), 오른쪽(그리드))
+31:         UHorizontalBox* HBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("MainLayout"));
+32:         UCanvasPanelSlot* HBoxSlot = RootCanvas->AddChildToCanvas(HBox);
+33:         HBoxSlot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
+34:         HBoxSlot->SetOffsets(FMargin(50.0f, 50.0f, 50.0f, 50.0f)); // 여백
+35: 
+36:         // === 왼쪽 패널 (상태바 + 대기열 + 버튼) ===
+37:         UVerticalBox* LeftPanel = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LeftPanel"));
+38:         UHorizontalBoxSlot* LeftPanelSlot = HBox->AddChildToHorizontalBox(LeftPanel);
+39:         LeftPanelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+40: 
+41:         // Timer Text
+42:         TimerText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TimerText"));
+43:         TimerText->SetText(FText::FromString(TEXT("Time: 60s")));
+44:         TimerText->Font.Size = 24;
+45:         LeftPanel->AddChildToVerticalBox(TimerText);
+46: 
+47:         // Score Text
+48:         ScoreText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ScoreText"));
+49:         ScoreText->SetText(FText::FromString(TEXT("Score: 0 / 1000")));
+50:         ScoreText->Font.Size = 24;
+51:         LeftPanel->AddChildToVerticalBox(ScoreText);
+52: 
+53:         // 빈 공간
+54:         UBorder* Spacer1 = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+55:         Spacer1->SetBrushColor(FLinearColor::Transparent);
+56:         UVerticalBoxSlot* SpacerSlot1 = LeftPanel->AddChildToVerticalBox(Spacer1);
+57:         SpacerSlot1->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+58:         SpacerSlot1->SetPadding(FMargin(0, 20));
+59: 
+60:         // 대기열 제목 -> 컨테이너 제목으로 변경
+61:         UTextBlock* PoolTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+62:         PoolTitle->SetText(FText::FromString(TEXT("Loot Container")));
+63:         LeftPanel->AddChildToVerticalBox(PoolTitle);
+64: 
+65:         // 새로운 컨테이너 그리드 
+66:         ContainerBoard = WidgetTree->ConstructWidget<UGridBoardWidget>(UGridBoardWidget::StaticClass(), TEXT("ContainerBoard"));
+67:         UVerticalBoxSlot* PoolSlot = LeftPanel->AddChildToVerticalBox(ContainerBoard);
+68:         PoolSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill)); // 남은 공간 모두 차지
+69: 
+70:         // [Search Container] 버튼
+71:         SearchBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SearchBtn"));
+72:         UTextBlock* SearchBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+73:         SearchBtnText->SetText(FText::FromString(TEXT("SEARCH CONTAINER")));
+74:         SearchBtnText->SetColorAndOpacity(FLinearColor::Black);
+75:         SearchBtn->AddChild(SearchBtnText);
+76:         // OnClicked는 GridGameMode가 연결될 때 바인딩하거나 여기서 바인딩
+77:         UVerticalBoxSlot* SearchSlot = LeftPanel->AddChildToVerticalBox(SearchBtn);
+78:         SearchSlot->SetPadding(FMargin(0, 10, 0, 0));
+79:         SearchSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+80: 
+81:         // Sell Button
+82:         UButton* SellBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellButton"));
+83:         UTextBlock* SellBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+84:         SellBtnText->SetText(FText::FromString(TEXT("SELL BAG")));
+85:         SellBtnText->SetColorAndOpacity(FLinearColor::Black);
+86:         SellBtn->AddChild(SellBtnText);
+87:         SellBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnSellButtonClicked);
+88:         
+89:         UVerticalBoxSlot* SellSlot = LeftPanel->AddChildToVerticalBox(SellBtn);
+90:         SellSlot->SetPadding(FMargin(0, 20, 0, 0));
+91:         SellSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic)); // 고정 크기
+92: 
+93:         // === 오른쪽 패널 (그리드 보드) ===
+94:         GridBoard = WidgetTree->ConstructWidget<UGridBoardWidget>(UGridBoardWidget::StaticClass(), TEXT("GridBoard"));
+95:         UHorizontalBoxSlot* RightPanelSlot = HBox->AddChildToHorizontalBox(GridBoard);
+96:         RightPanelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+97: 
+98:         // 게임모드에서 인벤토리 컴포넌트 연결
+99:         AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+100:         if (GM)
+101:         {
+102:             if (GM->InventoryComponent)
+103:             {
+104:                 GridBoard->InventoryComponent = GM->InventoryComponent;
+105:                 GM->InventoryComponent->OnInventoryChanged.AddDynamic(GridBoard, &UGridBoardWidget::RefreshGridUI);
+106:                 GridBoard->RefreshGridUI();
+107:             }
+108: 
+109:             if (GM->LootContainerComponent)
+110:             {
+111:                 ContainerBoard->InventoryComponent = GM->LootContainerComponent;
+112:                 // 컨테이너는 루트용이므로 가방과 다르게 표시할 수 있다면 좋지만, 일단 동일한 그리드 UI 공유
+113:                 GM->LootContainerComponent->OnInventoryChanged.AddDynamic(ContainerBoard, &UGridBoardWidget::RefreshGridUI);
+114:                 ContainerBoard->RefreshGridUI();
+115:             }
+116: 
+117:             // 서치 버튼 바인딩
+118:             SearchBtn->OnClicked.AddDynamic(GM, &AGridGameMode::StartContainerSearch);
+119:         }
+120:     }
+121:     return true;
+122: }
+123: 
+124: void UMainGameUI::UpdateScore(int32 NewScore)
+125: {
+126:     if (ScoreText)
+127:     {
+128:         ScoreText->SetText(FText::FromString(FString::Printf(TEXT("Score: %d / 1000"), NewScore)));
+129:     }
+130: }
+131: 
+132: void UMainGameUI::UpdateTimer(float RemainingTime)
+133: {
+134:     if (TimerText)
+135:     {
+136:         TimerText->SetText(FText::FromString(FString::Printf(TEXT("Time: %d s"), FMath::FloorToInt(RemainingTime))));
+137:     }
+138: }
+139: 
+140: void UMainGameUI::ShowGameResult(bool bIsWin)
+141: {
+142:     if (TimerText)
+143:     {
+144:         FString ResultStr = bIsWin ? TEXT("YOU WIN!") : TEXT("GAME OVER!");
+145:         TimerText->SetText(FText::FromString(ResultStr));
+146:         TimerText->SetColorAndOpacity(bIsWin ? FLinearColor::Green : FLinearColor::Red);
+147:     }
+148: }
+149: 
+150: void UMainGameUI::OnSellButtonClicked()
+151: {
+152:     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+153:     if (GM && GM->InventoryComponent)
+154:     {
+155:         // 간단한 방식: 꽉 차있는 칸 1칸당 10점으로 임시 계산, 혹은 아이템 ID를 통해 가치 계산
+156:         // 여기선 꽉 차있는 칸 개수 * 10점
+157:         int32 TotalValue = 0;
+158:         for (FName id : GM->InventoryComponent->GridCells)
+159:         {
+160:             if (id != NAME_None) TotalValue += 10;
+161:         }
+162: 
+163:         if (TotalValue > 0)
+164:         {
+165:             GM->AddScore(TotalValue);
+166:             GM->InventoryComponent->ClearInventory();
+167:         }
+168:     }
+169: }
+170: 
+The above content shows the entire, complete file contents of the requested file.

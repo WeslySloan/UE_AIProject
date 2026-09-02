@@ -1,4 +1,5 @@
 #include "GridInventoryComponent.h"
+#include "ItemInstance.h"
 
 UGridInventoryComponent::UGridInventoryComponent()
 {
@@ -64,29 +65,46 @@ bool UGridInventoryComponent::CheckItemFit(FName ItemID, int32 StartX, int32 Sta
     return true;
 }
 
-bool UGridInventoryComponent::AddItem(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight, EItemRarity Rarity, bool bIsExamined)
+bool UGridInventoryComponent::FindEmptySpace(int32 ItemWidth, int32 ItemHeight, int32& OutX, int32& OutY) const
 {
-    if (!CheckItemFit(ItemID, StartX, StartY, ItemWidth, ItemHeight))
+    for (int32 Y = 0; Y <= GridHeight - ItemHeight; ++Y)
+    {
+        for (int32 X = 0; X <= GridWidth - ItemWidth; ++X)
+        {
+            if (CheckItemFit(NAME_None, X, Y, ItemWidth, ItemHeight))
+            {
+                OutX = X;
+                OutY = Y;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool UGridInventoryComponent::AddItem(UItemInstance* ItemObj, int32 StartX, int32 StartY)
+{
+    if (!ItemObj) return false;
+
+    FIntPoint Size = ItemObj->GetCurrentSize();
+    if (!CheckItemFit(ItemObj->InstanceID, StartX, StartY, Size.X, Size.Y))
     {
         return false;
     }
 
-    for (int32 X = StartX; X < StartX + ItemWidth; ++X)
+    for (int32 X = StartX; X < StartX + Size.X; ++X)
     {
-        for (int32 Y = StartY; Y < StartY + ItemHeight; ++Y)
+        for (int32 Y = StartY; Y < StartY + Size.Y; ++Y)
         {
             int32 Index = GetIndex(X, Y);
             if (IsValidIndex(Index))
             {
-                GridCells[Index] = ItemID;
+                GridCells[Index] = ItemObj->InstanceID;
             }
         }
     }
 
-    // 아이템 희귀도 및 식별 상태 기억
-    ItemRarityMap.Add(ItemID, Rarity);
-    ItemExaminedMap.Add(ItemID, bIsExamined);
-
+    ItemInstances.Add(ItemObj->InstanceID, ItemObj);
     OnInventoryChanged.Broadcast();
     return true;
 }
@@ -105,8 +123,7 @@ void UGridInventoryComponent::RemoveItem(FName ItemID)
 
     if (bRemoved)
     {
-        ItemRarityMap.Remove(ItemID);
-        ItemExaminedMap.Remove(ItemID);
+        ItemInstances.Remove(ItemID);
         OnInventoryChanged.Broadcast();
     }
 }
@@ -117,7 +134,41 @@ void UGridInventoryComponent::ClearInventory()
     {
         GridCells[i] = NAME_None;
     }
-    ItemRarityMap.Empty();
-    ItemExaminedMap.Empty();
+    ItemInstances.Empty();
     OnInventoryChanged.Broadcast();
+}
+
+UItemInstance* UGridInventoryComponent::GetItemInstance(FName ItemID) const
+{
+    if (UItemInstance* const* FoundItem = ItemInstances.Find(ItemID))
+    {
+        return *FoundItem;
+    }
+    return nullptr;
+}
+
+bool UGridInventoryComponent::TryMergeItem(UItemInstance* SourceItem, FName TargetItemID)
+{
+    if (!SourceItem) return false;
+
+    UItemInstance* TargetItem = GetItemInstance(TargetItemID);
+    if (!TargetItem) return false;
+
+    // 종류가 같고 스택 가능할 때만 병합
+    if (SourceItem->TemplateID == TargetItem->TemplateID && TargetItem->IsStackable())
+    {
+        int32 AvailableSpace = TargetItem->MaxStack - TargetItem->CurrentStack;
+        if (AvailableSpace > 0)
+        {
+            int32 AmountToMove = FMath::Min(AvailableSpace, SourceItem->CurrentStack);
+            TargetItem->CurrentStack += AmountToMove;
+            SourceItem->CurrentStack -= AmountToMove;
+
+            OnInventoryChanged.Broadcast();
+            
+            // SourceItem이 완전히 다 비워졌다면 true 반환 (호출부에서 아이템 제거를 처리하도록 유도)
+            return (SourceItem->CurrentStack <= 0);
+        }
+    }
+    return false;
 }

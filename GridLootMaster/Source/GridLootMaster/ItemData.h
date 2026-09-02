@@ -9,9 +9,24 @@ class UTexture2D;
 UENUM(BlueprintType)
 enum class EItemCategory : uint8
 {
-    WeaponArmor UMETA(DisplayName = "Weapon/Armor"),
+    Weapon      UMETA(DisplayName = "Weapon"),
+    Armor       UMETA(DisplayName = "Armor"),
+    Helmet      UMETA(DisplayName = "Helmet"),
+    Rig         UMETA(DisplayName = "Rig"),
+    Backpack    UMETA(DisplayName = "Backpack"),
+    SafeBox     UMETA(DisplayName = "Safe Box"),
     Valuable    UMETA(DisplayName = "Valuable"),
-    Consumable  UMETA(DisplayName = "Consumable")
+    Consumable  UMETA(DisplayName = "Consumable"),
+    Attachment  UMETA(DisplayName = "Attachment")
+};
+
+UENUM(BlueprintType)
+enum class EAttachmentType : uint8
+{
+    None        UMETA(DisplayName = "None"),
+    Sight       UMETA(DisplayName = "Sight"),
+    Muzzle      UMETA(DisplayName = "Muzzle"),
+    Magazine    UMETA(DisplayName = "Magazine")
 };
 
 UENUM(BlueprintType)
@@ -55,9 +70,27 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
     FIntPoint Size;
 
+    // 겹치기 최대 수량
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
+    int32 MaxStack;
+
+    // 부착물일 경우 어떤 부위인지
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
+    EAttachmentType AttachmentType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
+    FString CompatibleAmmo;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
+    int32 MaxAmmo;
+
     // 상점 기준가
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
     int32 Value;
+
+    // 랜덤 스폰 확률용 가중치
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
+    int32 DropWeight;
 
     // 기본 무게
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
@@ -73,7 +106,11 @@ public:
         , Category(EItemCategory::Valuable)
         , Rarity(EItemRarity::Common)
         , Size(FIntPoint(1, 1))
+        , MaxStack(1)
+        , AttachmentType(EAttachmentType::None)
+        , MaxAmmo(0)
         , Value(0)
+        , DropWeight(100)
         , Weight(1.0f)
     {}
 };

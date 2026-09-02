@@ -6,6 +6,12 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnGameStateChanged);
 
+class UGridInventoryComponent;
+class UEquipmentComponent;
+class UMainGameUI;
+class UItemDataTable;
+class UMapManagerComponent;
+
 UCLASS()
 class GRIDLOOTMASTER_API AGridGameMode : public AGameModeBase
 {
@@ -14,10 +20,15 @@ class GRIDLOOTMASTER_API AGridGameMode : public AGameModeBase
 public:
     AGridGameMode();
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Map")
+    UMapManagerComponent* MapManagerComponent;
+
 protected:
     virtual void BeginPlay() override;
 
 public:
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
+    class UDataTable* ItemDataTable;
     // 게임 시간 제한 (초)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Game Rules")
     float TotalTimeLimit;
@@ -49,6 +60,21 @@ public:
     // 루트 컨테이너용 인벤토리 컴포넌트 추가
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
     class UGridInventoryComponent* LootContainerComponent;
+
+    // 안전 금고(SafeBox)용 인벤토리 컴포넌트 추가
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+    class UGridInventoryComponent* SafeBoxComponent;
+
+    // 조끼(Rig)용 인벤토리 컴포넌트 추가
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+    class UGridInventoryComponent* RigComponent;
+
+    // 주머니(Pocket)용 인벤토리 컴포넌트 추가
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+    class UGridInventoryComponent* PocketComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
+    class UEquipmentComponent* EquipmentComponent;
 
     // [탐색] 버튼을 눌렀을 때 서칭 시퀀스 시작
     UFUNCTION()

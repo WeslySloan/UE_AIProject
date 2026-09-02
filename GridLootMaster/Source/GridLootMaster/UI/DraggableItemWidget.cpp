@@ -1,14 +1,24 @@
 #include "DraggableItemWidget.h"
 #include "ItemDragDropOperation.h"
+#include "SplitStackWidget.h"
+#include "ContextMenuWidget.h"
+#include "InspectWidget.h"
+#include "../GridInventoryComponent.h"
+#include "../ItemInstance.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Input/Reply.h"
 #include "Blueprint/WidgetTree.h"
-#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Components/SizeBox.h"
 #include "Components/ProgressBar.h"
 #include "Components/Border.h"
 #include "Components/BorderSlot.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
+#include "Components/Image.h"
+#include "../GridGameMode.h"
+#include "Kismet/GameplayStatics.h"
 
 void UDraggableItemWidget::NativeConstruct()
 {
@@ -16,88 +26,212 @@ void UDraggableItemWidget::NativeConstruct()
     SetIsFocusable(true); 
 }
 
-void UDraggableItemWidget::InitWidgetUI()
+void UDraggableItemWidget::InitWidgetUI(bool bEquipped)
 {
-    if (WidgetTree && !WidgetTree->RootWidget)
+    if (!WidgetTree || !ItemObj) return;
+
+    if (!WidgetTree->RootWidget)
     {
         USizeBox* RootBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RootBox"));
-        RootBox->SetWidthOverride(ItemSize.X * 64.0f);
-        RootBox->SetHeightOverride(ItemSize.Y * 64.0f);
         WidgetTree->RootWidget = RootBox;
+    }
 
-        UBorder* BG = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-        
-        // Rarity 기반 색상 결정
-        FLinearColor RarityColor;
-        switch (Rarity)
+    USizeBox* RootBox = Cast<USizeBox>(WidgetTree->RootWidget);
+    RootBox->ClearChildren();
+
+    if (bEquipped)
+    {
+        RootBox->ClearWidthOverride();
+        RootBox->ClearHeightOverride();
+    }
+    else
+    {
+        FIntPoint CurrentSize = ItemObj->GetCurrentSize();
+        RootBox->SetWidthOverride(CurrentSize.X * 64.0f);
+        RootBox->SetHeightOverride(CurrentSize.Y * 64.0f);
+    }
+
+    UBorder* BG = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+    BG->SetClipping(EWidgetClipping::ClipToBounds); // 텍스트 삐져나감 방지
+    
+    // Rarity 등급 배경색
+    FLinearColor RarityColor;
+    if (ItemObj->Category == EItemCategory::Weapon)
+    {
+        // 무기의 경우 기본 희귀도 적용(그레이/블랙) 또는 나중에 추가
+        RarityColor = FLinearColor(0.25f, 0.25f, 0.25f, 1.0f);
+    }
+    else
+    {
+        switch (ItemObj->Rarity)
         {
-            case EItemRarity::Common:    RarityColor = FLinearColor(0.3f, 0.3f, 0.3f, 1.0f); break; // 짙은 회색
-            case EItemRarity::Uncommon:  RarityColor = FLinearColor(0.2f, 0.8f, 0.2f, 1.0f); break; // 녹색
-            case EItemRarity::Rare:      RarityColor = FLinearColor(0.1f, 0.4f, 1.0f, 1.0f); break; // 파란색
-            case EItemRarity::Epic:      RarityColor = FLinearColor(0.6f, 0.1f, 0.8f, 1.0f); break; // 보라색
-            case EItemRarity::Legendary: RarityColor = FLinearColor(1.0f, 0.8f, 0.1f, 1.0f); break; // 금색
-            case EItemRarity::Mythic:    RarityColor = FLinearColor(1.0f, 0.1f, 0.1f, 1.0f); break; // 빨간색
+            case EItemRarity::Common:    RarityColor = FLinearColor(0.3f, 0.3f, 0.3f, 1.0f); break; 
+            case EItemRarity::Uncommon:  RarityColor = FLinearColor(0.2f, 0.8f, 0.2f, 1.0f); break; 
+            case EItemRarity::Rare:      RarityColor = FLinearColor(0.1f, 0.4f, 1.0f, 1.0f); break; 
+            case EItemRarity::Epic:      RarityColor = FLinearColor(0.6f, 0.1f, 0.8f, 1.0f); break; 
+            case EItemRarity::Legendary: RarityColor = FLinearColor(1.0f, 0.8f, 0.1f, 1.0f); break; 
+            case EItemRarity::Mythic:    RarityColor = FLinearColor(1.0f, 0.1f, 0.1f, 1.0f); break; 
             default:                     RarityColor = FLinearColor(0.3f, 0.3f, 0.3f, 1.0f); break;
         }
+    }
 
-        // 미식별 상태면 시커먼 실루엣(회색 틴트)으로 강제 덮어쓰기
-        if (!bIsExamined)
-        {
-            RarityColor = FLinearColor(0.1f, 0.1f, 0.1f, 1.0f);
-        }
+    // 미식별 상태일 경우 어둡게
+    if (!ItemObj->bIsExamined)
+    {
+        RarityColor = FLinearColor(0.1f, 0.1f, 0.1f, 1.0f);
+    }
 
-        // Delta Force 스타일처럼 짙은 반투명 회색 배경에 Rarity 색상을 약간 섞음
-        FLinearColor DarkTint = FLinearColor(RarityColor.R * 0.3f, RarityColor.G * 0.3f, RarityColor.B * 0.3f, 0.85f);
-        BG->SetBrushColor(DarkTint);
-        RootBox->AddChild(BG);
+    FLinearColor DarkTint = FLinearColor(RarityColor.R * 0.3f, RarityColor.G * 0.3f, RarityColor.B * 0.3f, 0.85f);
+    BG->SetBrushColor(DarkTint);
+    RootBox->AddChild(BG);
+    
+    // UBorder에 자식을 하나만 넣을 수 있으므로 UOverlay를 넣습니다.
+    UOverlay* ContentOverlay = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
+    ContentOverlay->SetClipping(EWidgetClipping::ClipToBounds);
+    BG->AddChild(ContentOverlay);
+    
+    // 아이콘 표시 (우선)
+    if (UTexture2D* IconTex = ItemObj->GetDynamicIcon())
+    {
+        UImage* IconImg = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
+        IconImg->SetBrushFromTexture(IconTex);
         
-        // --- 텍스트 설정 ---
-        UTextBlock* NameText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-        FString DisplayName = ItemID.ToString();
-        int32 UnderscoreIdx;
-        if (DisplayName.FindChar('_', UnderscoreIdx))
+        if (UOverlaySlot* IconSlot = Cast<UOverlaySlot>(ContentOverlay->AddChild(IconImg)))
         {
-            DisplayName = DisplayName.Left(UnderscoreIdx);
+            IconSlot->SetHorizontalAlignment(HAlign_Center);
+            IconSlot->SetVerticalAlignment(VAlign_Center);
+            IconSlot->SetPadding(FMargin(5.0f));
+            // IconImg->SetBrushSize(FVector2D(IconTex->GetSizeX(), IconTex->GetSizeY())); 
         }
+    }
+
+    // VBox for Name and CompatibleAmmo
+    UVerticalBox* VBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
+    VBox->SetClipping(EWidgetClipping::ClipToBounds);
+    if (UOverlaySlot* VBoxSlot = Cast<UOverlaySlot>(ContentOverlay->AddChild(VBox)))
+    {
+        VBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+        VBoxSlot->SetVerticalAlignment(VAlign_Top);
+        VBoxSlot->SetPadding(FMargin(4.0f, 2.0f, 4.0f, 0.0f));
+    }
+
+    // --- 텍스트 블록 (이름) ---
+    UTextBlock* NameText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+    FString DisplayName = ItemObj->ItemName;
+    
+    if (!ItemObj->bIsExamined)
+    {
+        DisplayName = TEXT("???");
+        NameText->SetColorAndOpacity(FLinearColor(0.5f, 0.5f, 0.5f, 1.0f));
+    }
+    else
+    {
+        NameText->SetColorAndOpacity(FLinearColor(0.9f, 0.9f, 0.9f, 1.0f));
+    }
+
+    NameText->SetText(FText::FromString(DisplayName));
+    FSlateFontInfo NameFont = NameText->GetFont();
+    NameFont.Size = 9; // 줄임
+    NameText->SetFont(NameFont);
+    NameText->SetShadowOffset(FVector2D(1.0f, 1.0f));
+    NameText->SetShadowColorAndOpacity(FLinearColor::Black);
+    NameText->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+    NameText->SetClipping(EWidgetClipping::ClipToBounds);
+    
+    VBox->AddChild(NameText);
+
+    // --- 텍스트 블록 (호환 탄약) ---
+    if (ItemObj->Category == EItemCategory::Weapon && !ItemObj->CompatibleAmmo.IsEmpty())
+    {
+        UTextBlock* AmmoTypeText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        AmmoTypeText->SetText(FText::FromString(ItemObj->CompatibleAmmo));
+        AmmoTypeText->SetColorAndOpacity(FLinearColor(0.6f, 0.6f, 0.6f, 1.0f));
+        FSlateFontInfo AmmoFont = AmmoTypeText->GetFont();
+        AmmoFont.Size = 8; // 줄임
+        AmmoTypeText->SetFont(AmmoFont);
+        AmmoTypeText->SetShadowOffset(FVector2D(1.0f, 1.0f));
+        AmmoTypeText->SetShadowColorAndOpacity(FLinearColor::Black);
+        AmmoTypeText->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+        AmmoTypeText->SetClipping(EWidgetClipping::ClipToBounds);
         
-        // 미식별 상태면 텍스트를 ??? 로 숨김
-        if (!bIsExamined)
+        VBox->AddChild(AmmoTypeText);
+    }
+
+    // --- 텍스트 설정 (탄약 수 / 최대 탄약 수) ---
+    FString AmmoStr = TEXT("");
+    if (ItemObj->Category == EItemCategory::Weapon)
+    {
+        if (ItemObj->EquippedMagazine)
         {
-            DisplayName = TEXT("???");
-            NameText->SetColorAndOpacity(FLinearColor(0.5f, 0.5f, 0.5f, 1.0f)); // 어두운 회색 텍스트
+            AmmoStr = FString::Printf(TEXT("%d/%d"), ItemObj->EquippedMagazine->CurrentAmmo, ItemObj->EquippedMagazine->MaxAmmo);
         }
         else
         {
-            NameText->SetColorAndOpacity(FLinearColor(0.9f, 0.9f, 0.9f, 1.0f)); // 밝은 흰색 텍스트
+            // 탄창이 장착되지 않은 경우
+            AmmoStr = TEXT("0/0");
         }
+    }
+    else if (ItemObj->Category == EItemCategory::Attachment && ItemObj->AttachmentType == EAttachmentType::Magazine)
+    {
+        AmmoStr = FString::Printf(TEXT("%d/%d"), ItemObj->CurrentAmmo, ItemObj->MaxAmmo);
+    }
 
-        NameText->SetText(FText::FromString(DisplayName));
-        NameText->Font.Size = 12;
-        NameText->SetShadowOffset(FVector2D(1.0f, 1.0f));
-        NameText->SetShadowColorAndOpacity(FLinearColor::Black);
-        
-        // 텍스트를 좌상단에 배치
-        if (UBorderSlot* TextSlot = Cast<UBorderSlot>(BG->AddChild(NameText)))
-        {
-            TextSlot->SetHorizontalAlignment(HAlign_Left);
-            TextSlot->SetVerticalAlignment(VAlign_Top);
-            TextSlot->SetPadding(FMargin(4.0f, 2.0f, 0.0f, 0.0f));
-        }
+    if (!AmmoStr.IsEmpty())
+    {
+        UTextBlock* AmmoCountText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        AmmoCountText->SetText(FText::FromString(AmmoStr));
+        AmmoCountText->SetColorAndOpacity(FLinearColor(0.8f, 0.8f, 0.8f, 1.0f));
+        FSlateFontInfo AmmoCountFont = AmmoCountText->GetFont();
+        AmmoCountFont.Size = 10; // 줄임
+        AmmoCountText->SetFont(AmmoCountFont);
+        AmmoCountText->SetShadowOffset(FVector2D(1.0f, 1.0f));
+        AmmoCountText->SetShadowColorAndOpacity(FLinearColor::Black);
+        AmmoCountText->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+        AmmoCountText->SetClipping(EWidgetClipping::ClipToBounds);
 
-        // --- 프로그레스 바 (식별 중 표시용) ---
-        ExamineProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass());
-        ExamineProgressBar->SetVisibility(ESlateVisibility::Hidden); // 기본 숨김
-        ExamineProgressBar->SetPercent(0.0f);
-        ExamineProgressBar->WidgetStyle.FillImage.TintColor = FLinearColor::White;
-        
-        // 프로그레스 바를 하단에 배치
-        if (UBorderSlot* ProgressSlot = Cast<UBorderSlot>(BG->AddChild(ExamineProgressBar)))
+        if (UOverlaySlot* TextSlot = Cast<UOverlaySlot>(ContentOverlay->AddChild(AmmoCountText)))
         {
-            ProgressSlot->SetHorizontalAlignment(HAlign_Fill);
-            ProgressSlot->SetVerticalAlignment(VAlign_Bottom);
-            ProgressSlot->SetPadding(FMargin(4.0f, 0.0f, 4.0f, 4.0f));
-            // 높이 강제 조정 (UProgressBar 자체 속성 조절이 한계가 있으면 슬롯 단위에서 패딩으로 해결하거나 사이즈박스로 감싸야함)
+            TextSlot->SetHorizontalAlignment(HAlign_Right);
+            TextSlot->SetVerticalAlignment(VAlign_Bottom);
+            TextSlot->SetPadding(FMargin(0.0f, 0.0f, 4.0f, 2.0f));
         }
+    }
+
+    // --- 텍스트 설정 (수량/스택 표시) ---
+    if (ItemObj->bIsExamined && ItemObj->IsStackable())
+    {
+        UTextBlock* StackText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        StackText->SetText(FText::FromString(FString::FromInt(ItemObj->CurrentStack)));
+        StackText->SetColorAndOpacity(FLinearColor(0.8f, 0.8f, 0.8f, 1.0f));
+        FSlateFontInfo StackFont = StackText->GetFont();
+        StackFont.Size = 9; // 줄임
+        StackText->SetFont(StackFont);
+        StackText->SetShadowOffset(FVector2D(1.0f, 1.0f));
+        StackText->SetShadowColorAndOpacity(FLinearColor::Black);
+        StackText->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+        StackText->SetClipping(EWidgetClipping::ClipToBounds);
+
+        if (UOverlaySlot* StackSlot = Cast<UOverlaySlot>(ContentOverlay->AddChild(StackText)))
+        {
+            StackSlot->SetHorizontalAlignment(HAlign_Right);
+            StackSlot->SetVerticalAlignment(VAlign_Bottom);
+            StackSlot->SetPadding(FMargin(0.0f, 0.0f, 4.0f, 2.0f));
+        }
+    }
+
+    // --- 프로그레스 바 ---
+    ExamineProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass());
+    ExamineProgressBar->SetPercent(0.0f);
+    FProgressBarStyle ProgStyle = ExamineProgressBar->GetWidgetStyle();
+    ProgStyle.FillImage.TintColor = FLinearColor::White;
+    ExamineProgressBar->SetWidgetStyle(ProgStyle);
+    ExamineProgressBar->SetVisibility(ESlateVisibility::Hidden);
+    
+    if (UOverlaySlot* ProgressSlot = Cast<UOverlaySlot>(ContentOverlay->AddChild(ExamineProgressBar)))
+    {
+        ProgressSlot->SetHorizontalAlignment(HAlign_Fill);
+        ProgressSlot->SetVerticalAlignment(VAlign_Bottom);
+        ProgressSlot->SetPadding(FMargin(4.0f, 0.0f, 4.0f, 4.0f));
     }
 }
 
@@ -107,39 +241,126 @@ FReply UDraggableItemWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry
     return Reply.NativeReply;
 }
 
+FReply UDraggableItemWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+    if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && InMouseEvent.IsShiftDown())
+    {
+        if (ItemObj && ItemObj->CurrentStack > 1 && SourceInventory)
+        {
+            USplitStackWidget* SplitWidget = CreateWidget<USplitStackWidget>(GetWorld(), USplitStackWidget::StaticClass());
+            if (SplitWidget)
+            {
+                SplitWidget->Setup(ItemObj->CurrentStack - 1); // 최소 1개는 남겨야 함
+                SplitWidget->OnSplitConfirmed.AddDynamic(this, &UDraggableItemWidget::OnAutoSplitConfirmed);
+                SplitWidget->AddToViewport(100); // 팝업으로 띄움
+            }
+        }
+        return FReply::Handled();
+    }
+    else if (InMouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
+    {
+        if (ItemObj)
+        {
+            if (!SourceInventory)
+            {
+                OnRightClicked.Broadcast(ItemObj);
+                return FReply::Handled();
+            }
+
+            UContextMenuWidget* ContextMenu = CreateWidget<UContextMenuWidget>(GetWorld(), UContextMenuWidget::StaticClass());
+            if (ContextMenu)
+            {
+                FVector2D ScreenPos = InMouseEvent.GetScreenSpacePosition();
+                ContextMenu->Setup(ItemObj, ScreenPos);
+                ContextMenu->OnInspectClicked.AddDynamic(this, &UDraggableItemWidget::HandleInspectItem);
+                ContextMenu->OnDiscardClicked.AddDynamic(this, &UDraggableItemWidget::HandleDiscardItem);
+                ContextMenu->OnUnloadClicked.AddDynamic(this, &UDraggableItemWidget::HandleUnloadItem);
+                ContextMenu->AddToViewport(200); // 팝업으로 최상단에 띄움
+            }
+        }
+        return FReply::Handled();
+    }
+    return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
+}
+
+void UDraggableItemWidget::OnAutoSplitConfirmed(int32 SplitAmount)
+{
+    if (!ItemObj || !SourceInventory) return;
+
+    FIntPoint Size = ItemObj->GetCurrentSize();
+    int32 FreeX, FreeY;
+    if (SourceInventory->FindEmptySpace(Size.X, Size.Y, FreeX, FreeY))
+    {
+        // 1. 기존 아이템 수량 차감
+        ItemObj->CurrentStack -= SplitAmount;
+
+        // 2. 새 아이템 생성
+        UItemInstance* NewItem = NewObject<UItemInstance>(SourceInventory);
+        NewItem->InstanceID = FName(*FGuid::NewGuid().ToString());
+        NewItem->TemplateID = ItemObj->TemplateID;
+        NewItem->Category = ItemObj->Category;
+        NewItem->BaseSize = ItemObj->BaseSize;
+        NewItem->CurrentStack = SplitAmount;
+        NewItem->MaxStack = ItemObj->MaxStack;
+        NewItem->bIsRotated = ItemObj->bIsRotated;
+        NewItem->bIsExamined = ItemObj->bIsExamined;
+        NewItem->AttachmentType = ItemObj->AttachmentType;
+        NewItem->EquippedSight = ItemObj->EquippedSight;
+        NewItem->EquippedMuzzle = ItemObj->EquippedMuzzle;
+
+        // 3. 인벤토리에 추가 (자동으로 브로드캐스트 안될수있으므로 수동호출)
+        SourceInventory->AddItem(NewItem, FreeX, FreeY);
+        SourceInventory->OnInventoryChanged.Broadcast();
+    }
+}
+
+void UDraggableItemWidget::HandleInspectItem(UItemInstance* TargetItem)
+{
+    if (TargetItem)
+    {
+        UInspectWidget* InspectUI = CreateWidget<UInspectWidget>(GetWorld(), UInspectWidget::StaticClass());
+        if (InspectUI)
+        {
+            InspectUI->Setup(TargetItem);
+            InspectUI->AddToViewport(300); // 팝업창
+        }
+    }
+}
+
+void UDraggableItemWidget::HandleDiscardItem(UItemInstance* TargetItem)
+{
+    if (TargetItem && SourceInventory)
+    {
+        SourceInventory->RemoveItem(TargetItem->InstanceID);
+    }
+}
+
 void UDraggableItemWidget::NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation)
 {
     Super::NativeOnDragDetected(InGeometry, InMouseEvent, OutOperation);
 
-    // 미식별 상태면 드래그 불가
-    if (!bIsExamined)
+    if (!ItemObj || !ItemObj->bIsExamined)
     {
         return;
     }
 
     UItemDragDropOperation* DragDropOp = NewObject<UItemDragDropOperation>();
-    DragDropOp->ItemID = this->ItemID;
-    DragDropOp->ItemSize = this->ItemSize;
-    DragDropOp->Rarity = this->Rarity;
-    DragDropOp->bIsRotated = this->bIsRotated;
+    DragDropOp->ItemID = ItemObj->InstanceID;
+    DragDropOp->ItemObj = ItemObj;
     DragDropOp->OriginalWidget = this; 
+    DragDropOp->bIsSplitDrag = InMouseEvent.IsShiftDown() && (ItemObj->CurrentStack > 1);
+    DragDropOp->SourceInventory = SourceInventory;
     
-    // 드래그 시작 시점의 아이템 좌상단(Top-Left) 절대 좌표(화면 좌표)와 마우스 좌표 간의 차이를 저장합니다.
     FVector2D TopLeftScreenPos = InGeometry.GetAbsolutePosition();
     DragDropOp->MouseOffset = InMouseEvent.GetScreenSpacePosition() - TopLeftScreenPos;
     
-    // 드래그 비주얼 생성
     UDraggableItemWidget* DragVisual = CreateWidget<UDraggableItemWidget>(GetWorld(), UDraggableItemWidget::StaticClass());
-    DragVisual->ItemID = this->ItemID;
-    DragVisual->ItemSize = this->ItemSize;
-    DragVisual->bIsRotated = this->bIsRotated;
-    DragVisual->Rarity = this->Rarity; // Rarity도 복사!
+    DragVisual->ItemObj = ItemObj;
     DragVisual->InitWidgetUI();
     
     DragDropOp->DefaultDragVisual = DragVisual;
     DragDropOp->Pivot = EDragPivot::MouseDown;
 
-    // 현재 오퍼레이션 추적
     CurrentDragOp = DragDropOp;
     CurrentDragVisual = DragVisual;
 
@@ -148,37 +369,15 @@ void UDraggableItemWidget::NativeOnDragDetected(const FGeometry& InGeometry, con
 
 FReply UDraggableItemWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
-    if (InKeyEvent.GetKey() == EKeys::R)
+    if (InKeyEvent.GetKey() == EKeys::R && ItemObj)
     {
-        bIsRotated = !bIsRotated;
+        ItemObj->bIsRotated = !ItemObj->bIsRotated;
         
-        float W = bIsRotated ? (ItemSize.Y * 64.0f) : (ItemSize.X * 64.0f);
-        float H = bIsRotated ? (ItemSize.X * 64.0f) : (ItemSize.Y * 64.0f);
-
-        // 원본 비주얼 회전
-        if (WidgetTree && WidgetTree->RootWidget)
-        {
-            if (USizeBox* RootBox = Cast<USizeBox>(WidgetTree->RootWidget))
-            {
-                RootBox->SetWidthOverride(W);
-                RootBox->SetHeightOverride(H);
-            }
-        }
+        InitWidgetUI();
         
-        // 마우스에 붙어있는 드래그 비주얼도 같이 회전
-        if (CurrentDragVisual && CurrentDragVisual->WidgetTree && CurrentDragVisual->WidgetTree->RootWidget)
+        if (CurrentDragVisual)
         {
-            if (USizeBox* DragRootBox = Cast<USizeBox>(CurrentDragVisual->WidgetTree->RootWidget))
-            {
-                DragRootBox->SetWidthOverride(W);
-                DragRootBox->SetHeightOverride(H);
-            }
-        }
-
-        // 드래그 오퍼레이션 데이터에도 회전 반영
-        if (CurrentDragOp)
-        {
-            CurrentDragOp->bIsRotated = bIsRotated;
+            CurrentDragVisual->InitWidgetUI();
         }
 
         OnItemRotated();
@@ -186,4 +385,85 @@ FReply UDraggableItemWidget::NativeOnKeyDown(const FGeometry& InGeometry, const 
     }
     
     return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+}
+
+void UDraggableItemWidget::HandleUnloadItem(UItemInstance* TargetItem)
+{
+    if (!TargetItem) return;
+
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (!GM || !GM->ItemDataTable) return;
+
+    // 1. 무기인 경우: 결합된 탄창을 분리하여 인벤토리에 넣음
+    if (TargetItem->Category == EItemCategory::Weapon && TargetItem->EquippedMagazine)
+    {
+        UItemInstance* MagItem = TargetItem->EquippedMagazine;
+        
+        int32 FreeX, FreeY;
+        bool bAdded = false;
+        if (SourceInventory && SourceInventory->FindEmptySpace(MagItem->GetCurrentSize().X, MagItem->GetCurrentSize().Y, FreeX, FreeY))
+        {
+            SourceInventory->AddItem(MagItem, FreeX, FreeY);
+            bAdded = true;
+        }
+        else if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpace(MagItem->GetCurrentSize().X, MagItem->GetCurrentSize().Y, FreeX, FreeY))
+        {
+            GM->InventoryComponent->AddItem(MagItem, FreeX, FreeY);
+            bAdded = true;
+        }
+
+        if (bAdded)
+        {
+            TargetItem->EquippedMagazine = nullptr;
+            InitWidgetUI(SourceInventory == nullptr);
+            if (SourceInventory) SourceInventory->OnInventoryChanged.Broadcast();
+            else if (GM->InventoryComponent) GM->InventoryComponent->OnInventoryChanged.Broadcast();
+        }
+        return;
+    }
+
+    // 2. 탄창인 경우: 내부의 총알을 추출하여 인벤토리에 넣음
+    if (TargetItem->Category == EItemCategory::Attachment && TargetItem->AttachmentType == EAttachmentType::Magazine)
+    {
+        if (TargetItem->CurrentAmmo <= 0) return;
+
+        FName AmmoID = TEXT("Ammo_556_M995");
+        if (TargetItem->TemplateID == TEXT("Mag_M4"))
+        {
+            AmmoID = TEXT("Ammo_556_M995");
+        }
+        
+        FItemData* AmmoData = GM->ItemDataTable->FindRow<FItemData>(AmmoID, TEXT("Unload"));
+        if (!AmmoData) return;
+
+        int32 AmmoAmount = TargetItem->CurrentAmmo;
+        TargetItem->CurrentAmmo = 0;
+
+        while (AmmoAmount > 0)
+        {
+            int32 StackToSpawn = FMath::Min(AmmoAmount, AmmoData->MaxStack);
+            AmmoAmount -= StackToSpawn;
+
+            UItemInstance* NewAmmo = NewObject<UItemInstance>(GM);
+            NewAmmo->InstanceID = FName(*FString::Printf(TEXT("%s_Unloaded_%d"), *AmmoID.ToString(), FMath::RandRange(10000, 99999)));
+            NewAmmo->InitFromData(*AmmoData);
+            NewAmmo->CurrentStack = StackToSpawn;
+            NewAmmo->bIsExamined = true;
+            NewAmmo->bIsRotated = false;
+
+            int32 FreeX, FreeY;
+            if (SourceInventory && SourceInventory->FindEmptySpace(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeX, FreeY))
+            {
+                SourceInventory->AddItem(NewAmmo, FreeX, FreeY);
+            }
+            else if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpace(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeX, FreeY))
+            {
+                GM->InventoryComponent->AddItem(NewAmmo, FreeX, FreeY);
+            }
+        }
+
+        InitWidgetUI(SourceInventory == nullptr);
+        if (SourceInventory) SourceInventory->OnInventoryChanged.Broadcast();
+        else if (GM->InventoryComponent) GM->InventoryComponent->OnInventoryChanged.Broadcast();
+    }
 }

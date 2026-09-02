@@ -6,8 +6,8 @@
 #include "MainGameUI.generated.h"
 
 class UTextBlock;
-class UWrapBox;
 class UGridBoardWidget;
+class UEquipmentSlotWidget;
 
 UCLASS()
 class GRIDLOOTMASTER_API UMainGameUI : public UUserWidget
@@ -16,6 +16,9 @@ class GRIDLOOTMASTER_API UMainGameUI : public UUserWidget
     
 public:
     virtual bool Initialize() override;
+
+    virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+    virtual bool NativeSupportsKeyboardFocus() const override { return true; }
 
     UFUNCTION()
     void UpdateScore(int32 NewScore);
@@ -29,7 +32,25 @@ public:
     UFUNCTION()
     void OnSellButtonClicked();
 
+    UFUNCTION()
+    void OnSellAllButtonClicked();
+
+    UFUNCTION()
+    void OnBangButtonClicked();
+
+    UFUNCTION()
+    void OnToggleModeClicked();
+
 public:
+    UPROPERTY()
+    class UWidgetSwitcher* RightPanelSwitcher;
+
+    UPROPERTY()
+    class UMinimapWidget* MinimapUI;
+
+    UPROPERTY()
+    class UButton* ToggleModeButton;
+
     UPROPERTY()
     UTextBlock* ScoreText;
 
@@ -42,6 +63,42 @@ public:
 
     UPROPERTY()
     UGridBoardWidget* GridBoard;
+
+    UPROPERTY()
+    class UVerticalBox* LeftPanel;
+
+    UPROPERTY()
+    UGridBoardWidget* SafeBoxBoard;
+
+    UPROPERTY()
+    UGridBoardWidget* RigBoard;
+
+    UPROPERTY()
+    UGridBoardWidget* PocketBoard;
+
+    UPROPERTY()
+    FName ActiveWeaponSlot;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Equipment")
+    UEquipmentSlotWidget* HelmetSlot;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Equipment")
+    UEquipmentSlotWidget* ArmorSlot;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Equipment")
+    UEquipmentSlotWidget* WeaponSlot1;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Equipment")
+    UEquipmentSlotWidget* WeaponSlot2;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Equipment")
+    UEquipmentSlotWidget* BackpackSlot;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Equipment")
+    UEquipmentSlotWidget* SafeBoxSlot;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Equipment")
+    UEquipmentSlotWidget* RigSlot;
 
     // 상자 뒤지기(탐색) 버튼
     UPROPERTY()

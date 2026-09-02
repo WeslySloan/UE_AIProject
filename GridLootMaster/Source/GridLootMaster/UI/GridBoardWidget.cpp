@@ -1,15 +1,19 @@
 #include "GridBoardWidget.h"
 #include "ItemDragDropOperation.h"
-#include "../GridInventoryComponent.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/Border.h"
 #include "Components/BorderSlot.h"
 #include "Components/TextBlock.h"
+#include "Components/SizeBox.h"
+#include "SplitStackWidget.h"
 #include "DraggableItemWidget.h"
 #include "../GridGameMode.h"
+#include "../GridInventoryComponent.h"
+#include "../EquipmentComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "../ItemInstance.h"
 
 bool UGridBoardWidget::Initialize()
 {
@@ -17,8 +21,11 @@ bool UGridBoardWidget::Initialize()
 
     if (WidgetTree && !WidgetTree->RootWidget)
     {
+        RootSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RootSizeBox"));
+        WidgetTree->RootWidget = RootSizeBox;
+        
         GridCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("GridCanvas"));
-        WidgetTree->RootWidget = GridCanvas;
+        RootSizeBox->AddChild(GridCanvas);
 
         // 1. 전체 영역에 대한 히트 판정을 받기 위한 투명 배경 (마우스가 그리드 밖으로 조금 나가도 놓치지 않음)
         UBorder* HitTestBG = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
@@ -27,13 +34,13 @@ bool UGridBoardWidget::Initialize()
         HitSlot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
         HitSlot->SetOffsets(FMargin(0, 0, 0, 0));
 
-        // 2. 실제 시각적인 그리드 배경 (384x512 고정)
-        UBorder* BG = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-        BG->SetBrushColor(FLinearColor(0.1f, 0.1f, 0.1f, 0.8f));
-        UCanvasPanelSlot* BGSlot = GridCanvas->AddChildToCanvas(BG);
+        // 2. 실제 시각적인 그리드 배경
+        BackgroundBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+        BackgroundBorder->SetBrushColor(FLinearColor(0.1f, 0.1f, 0.1f, 0.8f));
+        UCanvasPanelSlot* BGSlot = GridCanvas->AddChildToCanvas(BackgroundBorder);
         BGSlot->SetPosition(FVector2D(0.0f, 0.0f));
-        // 가로 6칸, 세로 8칸 * 64픽셀 = 384 x 512
-        BGSlot->SetSize(FVector2D(6 * 64.0f, 8 * 64.0f));
+        // 임시 크기 부여, RefreshGridUI에서 다시 맞춤
+        BGSlot->SetSize(FVector2D(64.0f, 64.0f));
         
         // 미리보기용 외곽선 (평소엔 숨김)
         PreviewBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("PreviewBorder"));
@@ -61,31 +68,177 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
 
         if (GetGridCellFromMousePosition(InGeometry, InDragDropEvent, ItemDropOp, GridX, GridY))
         {
-            int32 Width = ItemDropOp->bIsRotated ? ItemDropOp->ItemSize.Y : ItemDropOp->ItemSize.X;
-            int32 Height = ItemDropOp->bIsRotated ? ItemDropOp->ItemSize.X : ItemDropOp->ItemSize.Y;
+            FIntPoint CurrentSize = ItemDropOp->ItemObj->GetCurrentSize();
+            int32 Width = CurrentSize.X;
+            int32 Height = CurrentSize.Y;
 
+            // 스플릿 모드인 경우 팝업 띄우고 즉시 종료
+            if (ItemDropOp->bIsSplitDrag && ItemDropOp->SourceInventory)
+            {
+                PendingSplitItem = ItemDropOp->ItemObj;
+                PendingSplitSourceInv = ItemDropOp->SourceInventory;
+                PendingSplitX = GridX;
+                PendingSplitY = GridY;
+                
+                USplitStackWidget* SplitWidget = CreateWidget<USplitStackWidget>(GetWorld(), USplitStackWidget::StaticClass());
+                if (SplitWidget)
+                {
+                    SplitWidget->Setup(ItemDropOp->ItemObj->CurrentStack - 1);
+                    SplitWidget->OnSplitConfirmed.AddDynamic(this, &UGridBoardWidget::OnSplitDragConfirmed);
+                    SplitWidget->AddToViewport(100);
+                }
+                
+                if (ItemDropOp->OriginalWidget)
+                {
+                    ItemDropOp->OriginalWidget->SetVisibility(ESlateVisibility::Visible);
+                }
+                return true;
+            }
+
+            // 1. 해당 칸에 이미 동일한 종류의 아이템이 있는지 (병합 가능 여부 확인)
+            if (GridX >= 0 && GridX < InventoryComponent->GridWidth && GridY >= 0 && GridY < InventoryComponent->GridHeight)
+            {
+                int32 TargetIndex = InventoryComponent->GetIndex(GridX, GridY);
+                if (InventoryComponent->IsValidIndex(TargetIndex))
+                {
+                    FName ExistingItem = InventoryComponent->GridCells[TargetIndex];
+                    if (ExistingItem != NAME_None && ExistingItem != ItemDropOp->ItemID)
+                    {
+                        UItemInstance* ExistingItemObj = InventoryComponent->GetItemInstance(ExistingItem);
+                        
+                        // 퀵 모딩 (부착물 -> 무기)
+                        if (ItemDropOp->ItemObj->Category == EItemCategory::Attachment && ExistingItemObj && ExistingItemObj->Category == EItemCategory::Weapon)
+                        {
+                            AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+                            EAttachmentType ModType = ItemDropOp->ItemObj->AttachmentType;
+                            
+                            // 무기에 해당 슬롯이 비어있다면
+                            bool bAttached = false;
+                            if (ModType == EAttachmentType::Sight && !ExistingItemObj->EquippedSight)
+                            {
+                                ExistingItemObj->EquippedSight = ItemDropOp->ItemObj;
+                                bAttached = true;
+                            }
+                            else if (ModType == EAttachmentType::Muzzle && !ExistingItemObj->EquippedMuzzle)
+                            {
+                                ExistingItemObj->EquippedMuzzle = ItemDropOp->ItemObj;
+                                bAttached = true;
+                            }
+                            else if (ModType == EAttachmentType::Magazine && !ExistingItemObj->EquippedMagazine)
+                            {
+                                ExistingItemObj->EquippedMagazine = ItemDropOp->ItemObj;
+                                bAttached = true;
+                            }
+                            
+                            if (bAttached)
+                            {
+                                if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemObj->InstanceID);
+                                if (ItemDropOp->OriginalWidget) ItemDropOp->OriginalWidget->RemoveFromParent();
+                                
+                                RefreshGridUI();
+                                if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->OnInventoryChanged.Broadcast();
+                                return true;
+                            }
+                        }
+                        
+                        // 탄약 삽탄 로직 추가 (드래그 대상이 탄약인 경우)
+                        if (ItemDropOp->ItemObj->TemplateID.ToString().Contains("Ammo"))
+                        {
+                            UItemInstance* TargetMag = nullptr;
+                            if (ExistingItemObj->Category == EItemCategory::Attachment && ExistingItemObj->AttachmentType == EAttachmentType::Magazine)
+                            {
+                                TargetMag = ExistingItemObj;
+                            }
+                            else if (ExistingItemObj->Category == EItemCategory::Weapon && ExistingItemObj->EquippedMagazine)
+                            {
+                                TargetMag = ExistingItemObj->EquippedMagazine;
+                            }
+
+                            if (TargetMag && TargetMag->CurrentAmmo < TargetMag->MaxAmmo)
+                            {
+                                int32 AvailableSpace = TargetMag->MaxAmmo - TargetMag->CurrentAmmo;
+                                int32 AmountToLoad = FMath::Min(ItemDropOp->ItemObj->CurrentStack, AvailableSpace);
+                                
+                                TargetMag->CurrentAmmo += AmountToLoad;
+                                ItemDropOp->ItemObj->CurrentStack -= AmountToLoad;
+                                
+                                bool bAmmoDepleted = (ItemDropOp->ItemObj->CurrentStack <= 0);
+                                if (bAmmoDepleted)
+                                {
+                                    if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemObj->InstanceID);
+                                    if (ItemDropOp->OriginalWidget) ItemDropOp->OriginalWidget->RemoveFromParent();
+                                }
+                                
+                                RefreshGridUI();
+                                if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->OnInventoryChanged.Broadcast();
+                                return true;
+                            }
+                        }
+
+                        if (InventoryComponent->TryMergeItem(ItemDropOp->ItemObj, ExistingItem))
+                {
+                    // 완전 병합되어 남은 수량이 0이 된 경우 (원본 제거)
+                    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+                    if (GM)
+                    {
+                        if (GM->InventoryComponent) GM->InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                        if (GM->LootContainerComponent) GM->LootContainerComponent->RemoveItem(ItemDropOp->ItemID);
+                        if (GM->EquipmentComponent) GM->EquipmentComponent->RemoveItemByInstanceID(ItemDropOp->ItemID);
+                        if (GM->SafeBoxComponent) GM->SafeBoxComponent->RemoveItem(ItemDropOp->ItemID);
+                        if (GM->RigComponent) GM->RigComponent->RemoveItem(ItemDropOp->ItemID);
+                        if (GM->PocketComponent) GM->PocketComponent->RemoveItem(ItemDropOp->ItemID);
+                    }
+                    if (ItemDropOp->OriginalWidget)
+                    {
+                        ItemDropOp->OriginalWidget->RemoveFromParent();
+                    }
+                }
+                // 부분 병합이든 완전 병합이든 UI를 갱신하고 드롭 처리 완료
+                // (부분 병합 시에는 원본 아이템이 계속 원래 자리에 남아있고 UI의 스택 숫자만 갱신됨)
+                RefreshGridUI();
+                
+                // 원본 인벤토리(상자 등) UI도 갱신해야 하므로 GameMode 등을 통해 전체 브로드캐스트 권장
+                AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+                if (GM && GM->LootContainerComponent) GM->LootContainerComponent->OnInventoryChanged.Broadcast();
+                if (GM && GM->SafeBoxComponent) GM->SafeBoxComponent->OnInventoryChanged.Broadcast();
+                if (GM && GM->RigComponent) GM->RigComponent->OnInventoryChanged.Broadcast();
+                if (GM && GM->PocketComponent) GM->PocketComponent->OnInventoryChanged.Broadcast();
+                
+                return true;
+                    }
+                }
+            }
+
+            // 2. 병합이 아니면 빈 공간 이동 처리
             if (InventoryComponent->CheckItemFit(ItemDropOp->ItemID, GridX, GridY, Width, Height))
             {
-                // 드래그 전의 기존 위치에서 아이템 제거 (가방 -> 가방, 혹은 상자 -> 가방 이동 시 중복 방지)
                 AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
                 if (GM)
                 {
                     if (GM->InventoryComponent) GM->InventoryComponent->RemoveItem(ItemDropOp->ItemID);
                     if (GM->LootContainerComponent) GM->LootContainerComponent->RemoveItem(ItemDropOp->ItemID);
+                    if (GM->EquipmentComponent) GM->EquipmentComponent->RemoveItemByInstanceID(ItemDropOp->ItemID);
+                    if (GM->SafeBoxComponent) GM->SafeBoxComponent->RemoveItem(ItemDropOp->ItemID);
+                    if (GM->RigComponent) GM->RigComponent->RemoveItem(ItemDropOp->ItemID);
+                    if (GM->PocketComponent) GM->PocketComponent->RemoveItem(ItemDropOp->ItemID);
                 }
                 else
                 {
                     InventoryComponent->RemoveItem(ItemDropOp->ItemID);
                 }
                 
-                if (InventoryComponent->AddItem(ItemDropOp->ItemID, GridX, GridY, Width, Height, ItemDropOp->Rarity, true))
+                // 새 위치에 아이템 추가
+                if (InventoryComponent->AddItem(ItemDropOp->ItemObj, GridX, GridY))
                 {
-                    // 성공 시 원본 UI를 화면(대기열)에서 제거
                     if (ItemDropOp->OriginalWidget)
                     {
                         ItemDropOp->OriginalWidget->RemoveFromParent();
                     }
                     RefreshGridUI();
+                    if (GM && GM->LootContainerComponent) GM->LootContainerComponent->OnInventoryChanged.Broadcast();
+                    if (GM && GM->SafeBoxComponent) GM->SafeBoxComponent->OnInventoryChanged.Broadcast();
+                    if (GM && GM->RigComponent) GM->RigComponent->OnInventoryChanged.Broadcast();
+                    if (GM && GM->PocketComponent) GM->PocketComponent->OnInventoryChanged.Broadcast();
                     return true;
                 }
             }
@@ -112,8 +265,9 @@ bool UGridBoardWidget::NativeOnDragOver(const FGeometry& InGeometry, const FDrag
 
         if (GetGridCellFromMousePosition(InGeometry, InDragDropEvent, ItemDropOp, GridX, GridY))
         {
-            int32 Width = ItemDropOp->bIsRotated ? ItemDropOp->ItemSize.Y : ItemDropOp->ItemSize.X;
-            int32 Height = ItemDropOp->bIsRotated ? ItemDropOp->ItemSize.X : ItemDropOp->ItemSize.Y;
+            FIntPoint ItemSize = ItemDropOp->ItemObj->GetCurrentSize();
+            int32 Width = ItemSize.X;
+            int32 Height = ItemSize.Y;
 
             bool bFits = InventoryComponent->CheckItemFit(ItemDropOp->ItemID, GridX, GridY, Width, Height);
 
@@ -143,17 +297,14 @@ void UGridBoardWidget::NativeOnDragLeave(const FDragDropEvent& InDragDropEvent, 
 
 bool UGridBoardWidget::GetGridCellFromMousePosition(const FGeometry& Geometry, const FPointerEvent& PointerEvent, UItemDragDropOperation* Operation, int32& OutX, int32& OutY)
 {
-    // 마우스 커서의 스크린 좌표
     FVector2D MouseScreenPos = PointerEvent.GetScreenSpacePosition();
-    
-    // 드래그 중인 비주얼의 실제 '왼쪽 상단(Top-Left)' 스크린 좌표 계산
     FVector2D VisualTopLeftScreenPos = MouseScreenPos;
+    
     if (Operation)
     {
         VisualTopLeftScreenPos -= Operation->MouseOffset;
     }
 
-    // 그리드 위젯 내부의 로컬 좌표로 변환
     FVector2D LocalPos = Geometry.AbsoluteToLocal(VisualTopLeftScreenPos);
     const float CellSize = 64.0f; 
     
@@ -166,31 +317,48 @@ void UGridBoardWidget::RefreshGridUI()
 {
     if (!GridCanvas || !InventoryComponent) return;
 
-    // 기존에 추가했던 아이템 위젯들과 그리드 타일 제거
-    // 초기에 추가된 3개의 배경(HitTestBG, BG, PreviewBorder)은 남겨둬야 함.
-    // 역순으로 순회하며 안전하게 제거
     for (int32 i = GridCanvas->GetChildrenCount() - 1; i >= 0; --i)
     {
         UWidget* Child = GridCanvas->GetChildAt(i);
-        // 처음 만들어진 3개 위젯은 지우지 않음 (이름으로 구분하거나 인덱스 0,1은 고정)
-        if (Child->GetName() == TEXT("PreviewBorder") || i <= 1)
-        {
-            continue;
-        }
+        if (Child->GetName() == TEXT("PreviewBorder") || i <= 1) continue;
         GridCanvas->RemoveChildAt(i);
     }
 
-    // 1. 빈 그리드 타일(칸) 먼저 모두 그리기
+    if (BackgroundBorder)
+    {
+        if (UCanvasPanelSlot* BGSlot = Cast<UCanvasPanelSlot>(BackgroundBorder->Slot))
+        {
+            BGSlot->SetSize(FVector2D(InventoryComponent->GridWidth * 64.0f, InventoryComponent->GridHeight * 64.0f));
+        }
+    }
+
+    if (RootSizeBox)
+    {
+        RootSizeBox->SetWidthOverride(InventoryComponent->GridWidth * 64.0f);
+        RootSizeBox->SetHeightOverride(InventoryComponent->GridHeight * 64.0f);
+    }
+
+    if (GridCanvas && GridCanvas->GetChildrenCount() > 0)
+    {
+        if (UWidget* HitTestBGWidget = GridCanvas->GetChildAt(0))
+        {
+            if (UCanvasPanelSlot* HitSlot = Cast<UCanvasPanelSlot>(HitTestBGWidget->Slot))
+            {
+                HitSlot->SetAnchors(FAnchors(0.0f, 0.0f, 0.0f, 0.0f)); // 자동 확장을 막음
+                HitSlot->SetSize(FVector2D(InventoryComponent->GridWidth * 64.0f, InventoryComponent->GridHeight * 64.0f));
+            }
+        }
+    }
+
     for (int Y = 0; Y < InventoryComponent->GridHeight; ++Y)
     {
         for (int X = 0; X < InventoryComponent->GridWidth; ++X)
         {
             UBorder* CellVisual = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-            CellVisual->SetBrushColor(FLinearColor(0.5f, 0.5f, 0.5f, 0.4f)); // 더 밝고 선명한 회색 (칸 구분을 확실하게)
+            CellVisual->SetBrushColor(FLinearColor(0.5f, 0.5f, 0.5f, 0.4f));
             CellVisual->SetVisibility(ESlateVisibility::HitTestInvisible);
             
             UCanvasPanelSlot* CellSlot = GridCanvas->AddChildToCanvas(CellVisual);
-            // 외곽선 효과를 위해 1픽셀 마진을 줌
             CellSlot->SetPosition(FVector2D(X * 64.0f + 1.0f, Y * 64.0f + 1.0f));
             CellSlot->SetSize(FVector2D(62.0f, 62.0f)); 
         }
@@ -209,59 +377,83 @@ void UGridBoardWidget::RefreshGridUI()
             {
                 CheckedItems.Add(ItemID);
 
-                // 이 아이템이 차지하는 실제 크기(Width, Height) 계산
-                int32 MinX = X, MaxX = X;
-                int32 MinY = Y, MaxY = Y;
-
-                for (int ty = Y; ty < InventoryComponent->GridHeight; ++ty)
-                {
-                    for (int tx = 0; tx < InventoryComponent->GridWidth; ++tx)
-                    {
-                        if (InventoryComponent->GridCells[InventoryComponent->GetIndex(tx, ty)] == ItemID)
-                        {
-                            if (tx > MaxX) MaxX = tx;
-                            if (tx < MinX) MinX = tx; // (X는 루프상 MinX보다 작을 수도 있음)
-                            if (ty > MaxY) MaxY = ty;
-                        }
-                    }
-                }
-
-                int32 ItemW = MaxX - MinX + 1;
-                int32 ItemH = MaxY - MinY + 1;
-
                 UDraggableItemWidget* ItemVisual = WidgetTree->ConstructWidget<UDraggableItemWidget>(UDraggableItemWidget::StaticClass());
-                ItemVisual->ItemID = ItemID;
-                ItemVisual->ItemSize = FIntPoint(ItemW, ItemH);
-                ItemVisual->bIsRotated = false; // 그리드 내의 현재 모양을 기본 모양으로 취급
-                
-                // 저장된 희귀도 불러오기 (기본값 Common)
-                EItemRarity SavedRarity = EItemRarity::Common;
-                if (const EItemRarity* FoundRarity = InventoryComponent->ItemRarityMap.Find(ItemID))
-                {
-                    SavedRarity = *FoundRarity;
-                }
-                ItemVisual->Rarity = SavedRarity;
-
-                // 식별(Examined) 상태 불러오기 (기본값 true)
-                bool bSavedExamined = true;
-                if (const bool* FoundExamined = InventoryComponent->ItemExaminedMap.Find(ItemID))
-                {
-                    bSavedExamined = *FoundExamined;
-                }
-                ItemVisual->bIsExamined = bSavedExamined;
-
-                // InitWidgetUI()를 호출하면 DraggableItemWidget 내부에서 텍스트와 배경이 세팅됨
+                ItemVisual->ItemObj = InventoryComponent->GetItemInstance(ItemID);
+                ItemVisual->SourceInventory = InventoryComponent;
                 ItemVisual->InitWidgetUI();
                 
-                // 가방 내부에서도 클릭하여 드래그할 수 있도록 Visible로 설정 (기본이 Visible)
-                ItemVisual->SetVisibility(ESlateVisibility::Visible);
-
-                UCanvasPanelSlot* CanvasSlot = GridCanvas->AddChildToCanvas(ItemVisual);
-                
-                // 위치와 크기를 64배수로 딱 맞추어 드래그 시 좌표 오차가 없도록 함
-                CanvasSlot->SetPosition(FVector2D(MinX * 64.0f, MinY * 64.0f));
-                CanvasSlot->SetAutoSize(true); // DraggableItem 내부의 SizeBox에 크기를 위임
+                UCanvasPanelSlot* ItemSlot = GridCanvas->AddChildToCanvas(ItemVisual);
+                ItemSlot->SetPosition(FVector2D(X * 64.0f, Y * 64.0f));
+                ItemSlot->SetAutoSize(true);
+                ItemSlot->SetZOrder(10); // 아이템이 항상 칸 배경 위로 오게 함
             }
         }
+    }
+}
+
+void UGridBoardWidget::OnSplitDragConfirmed(int32 SplitAmount)
+{
+    if (!PendingSplitItem || !PendingSplitSourceInv || !InventoryComponent) return;
+
+    FIntPoint Size = PendingSplitItem->GetCurrentSize();
+    int32 Width = Size.X;
+    int32 Height = Size.Y;
+
+    // 1. 병합 가능한 타겟 아이템 확인
+    if (PendingSplitX >= 0 && PendingSplitX < InventoryComponent->GridWidth && PendingSplitY >= 0 && PendingSplitY < InventoryComponent->GridHeight)
+    {
+        int32 TargetIndex = InventoryComponent->GetIndex(PendingSplitX, PendingSplitY);
+        if (InventoryComponent->IsValidIndex(TargetIndex))
+        {
+            FName ExistingItem = InventoryComponent->GridCells[TargetIndex];
+            if (ExistingItem != NAME_None && ExistingItem != PendingSplitItem->InstanceID)
+            {
+                UItemInstance* TargetObj = InventoryComponent->GetItemInstance(ExistingItem);
+                if (TargetObj && TargetObj->TemplateID == PendingSplitItem->TemplateID && TargetObj->IsStackable())
+                {
+                    int32 AvailableSpace = TargetObj->MaxStack - TargetObj->CurrentStack;
+                    if (AvailableSpace > 0)
+                    {
+                        int32 AmountToMove = FMath::Min(AvailableSpace, SplitAmount);
+                        TargetObj->CurrentStack += AmountToMove;
+                        PendingSplitItem->CurrentStack -= AmountToMove;
+
+                        PendingSplitSourceInv->OnInventoryChanged.Broadcast();
+                        InventoryComponent->OnInventoryChanged.Broadcast();
+                        
+                        AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+                        if (GM && GM->LootContainerComponent) GM->LootContainerComponent->OnInventoryChanged.Broadcast();
+                        return; // 완료
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. 빈 공간에 새로 아이템 생성하여 이동
+    if (InventoryComponent->CheckItemFit(PendingSplitItem->InstanceID, PendingSplitX, PendingSplitY, Width, Height))
+    {
+        PendingSplitItem->CurrentStack -= SplitAmount;
+
+        UItemInstance* NewItem = NewObject<UItemInstance>(InventoryComponent);
+        NewItem->InstanceID = FName(*FGuid::NewGuid().ToString());
+        NewItem->TemplateID = PendingSplitItem->TemplateID;
+        NewItem->Category = PendingSplitItem->Category;
+        NewItem->BaseSize = PendingSplitItem->BaseSize;
+        NewItem->CurrentStack = SplitAmount;
+        NewItem->MaxStack = PendingSplitItem->MaxStack;
+        NewItem->bIsRotated = PendingSplitItem->bIsRotated;
+        NewItem->bIsExamined = PendingSplitItem->bIsExamined;
+        NewItem->AttachmentType = PendingSplitItem->AttachmentType;
+        NewItem->EquippedSight = PendingSplitItem->EquippedSight;
+        NewItem->EquippedMuzzle = PendingSplitItem->EquippedMuzzle;
+
+        InventoryComponent->AddItem(NewItem, PendingSplitX, PendingSplitY);
+
+        PendingSplitSourceInv->OnInventoryChanged.Broadcast();
+        InventoryComponent->OnInventoryChanged.Broadcast();
+        
+        AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+        if (GM && GM->LootContainerComponent) GM->LootContainerComponent->OnInventoryChanged.Broadcast();
     }
 }

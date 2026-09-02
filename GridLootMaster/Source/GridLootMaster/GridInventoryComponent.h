@@ -46,21 +46,29 @@ public:
     // 2D 좌표를 1D 인덱스로 변환
     int32 GetIndex(int32 X, int32 Y) const;
 
-    // 배치된 아이템들의 Rarity를 기억하기 위한 맵
+    // 배치된 아이템 인스턴스들을 관리하는 맵
     UPROPERTY()
-    TMap<FName, EItemRarity> ItemRarityMap;
-
-    // 배치된 아이템들의 식별(Examined) 여부를 기억하기 위한 맵
-    UPROPERTY()
-    TMap<FName, bool> ItemExaminedMap;
+    TMap<FName, class UItemInstance*> ItemInstances;
 
     // 해당 위치에 아이템을 배치할 수 있는지 확인합니다.
     UFUNCTION(BlueprintCallable, Category = "Inventory")
     bool CheckItemFit(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight) const;
 
-    // 아이템을 배치합니다. (성공 시 true 반환)
+    // 인벤토리 내에서 아이템을 배치할 빈 공간을 찾습니다.
     UFUNCTION(BlueprintCallable, Category = "Inventory")
-    bool AddItem(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight, EItemRarity Rarity = EItemRarity::Common, bool bIsExamined = true);
+    bool FindEmptySpace(int32 ItemWidth, int32 ItemHeight, int32& OutX, int32& OutY) const;
+
+    // 아이템 인스턴스를 인벤토리에 추가합니다.
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    bool AddItem(class UItemInstance* ItemObj, int32 StartX, int32 StartY);
+
+    // 스택 가능한 아이템을 겹치려고 시도합니다. (초과 시 false 혹은 남은 수량 처리 구현용)
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    bool TryMergeItem(class UItemInstance* SourceItem, FName TargetItemID);
+
+    // 인스턴스를 반환합니다.
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    class UItemInstance* GetItemInstance(FName ItemID) const;
 
     // 아이템을 인벤토리에서 제거합니다.
     UFUNCTION(BlueprintCallable, Category = "Inventory")

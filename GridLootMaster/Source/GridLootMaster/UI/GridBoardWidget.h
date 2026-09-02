@@ -19,10 +19,28 @@ public:
     UGridInventoryComponent* InventoryComponent;
 
     UPROPERTY()
+    class UItemInstance* PendingSplitItem;
+    
+    UPROPERTY()
+    class UGridInventoryComponent* PendingSplitSourceInv;
+
+    int32 PendingSplitX;
+    int32 PendingSplitY;
+
+    UFUNCTION()
+    void OnSplitDragConfirmed(int32 SplitAmount);
+
+    UPROPERTY()
     UCanvasPanel* GridCanvas;
 
     UPROPERTY()
     class UBorder* PreviewBorder;
+
+    UPROPERTY()
+    class UBorder* BackgroundBorder;
+
+    UPROPERTY()
+    class USizeBox* RootSizeBox;
 
 protected:
     virtual bool NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;

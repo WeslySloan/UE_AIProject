@@ -4,20 +4,84 @@
 #include "GridInventoryComponent.h"
 #include "UI/MainGameUI.h"
 #include "Kismet/GameplayStatics.h"
+#include "ItemInstance.h"
+#include "EquipmentComponent.h"
+#include "Map/MapManagerComponent.h"
 
 AGridGameMode::AGridGameMode()
 {
     InventoryComponent = CreateDefaultSubobject<UGridInventoryComponent>(TEXT("InventoryComponent"));
     LootContainerComponent = CreateDefaultSubobject<UGridInventoryComponent>(TEXT("LootContainerComponent"));
+    SafeBoxComponent = CreateDefaultSubobject<UGridInventoryComponent>(TEXT("SafeBoxComponent"));
+    RigComponent = CreateDefaultSubobject<UGridInventoryComponent>(TEXT("RigComponent"));
+    PocketComponent = CreateDefaultSubobject<UGridInventoryComponent>(TEXT("PocketComponent"));
+    EquipmentComponent = CreateDefaultSubobject<UEquipmentComponent>(TEXT("EquipmentComponent"));
+    MapManagerComponent = CreateDefaultSubobject<UMapManagerComponent>(TEXT("MapManagerComponent"));
 }
 
 void AGridGameMode::BeginPlay()
 {
     Super::BeginPlay();
 
-    InventoryComponent->InitializeGrid(6, 8);
-    // 컨테이너는 4x4 크기로 임시 생성
-    LootContainerComponent->InitializeGrid(4, 4); 
+    InventoryComponent->InitializeGrid(5, 5); // 백팩 사이즈 (예: 5x5)
+    LootContainerComponent->InitializeGrid(6, 6); 
+    SafeBoxComponent->InitializeGrid(2, 2);
+    RigComponent->InitializeGrid(4, 3); // Rig 사이즈 (예: 4x3)
+    PocketComponent->InitializeGrid(5, 1); // Pocket 사이즈 (예: 가로 5, 세로 1)
+
+    // 기본 가방 아이템 장착 (6x8 인벤토리 역할)
+    UItemInstance* DefBackpack = NewObject<UItemInstance>(this);
+    DefBackpack->InstanceID = TEXT("Item_DefBackpack");
+    DefBackpack->TemplateID = TEXT("DefaultBackpack");
+    DefBackpack->Category = EItemCategory::Backpack;
+    DefBackpack->BaseSize = FIntPoint(2, 2); // 슬롯 크기 2x2
+    DefBackpack->CurrentStack = 1;
+    DefBackpack->MaxStack = 1;
+    EquipmentComponent->EquipItem(TEXT("Backpack"), DefBackpack);
+
+    // 기본 안전 금고 장착 (2x2)
+    UItemInstance* DefSafeBox = NewObject<UItemInstance>(this);
+    DefSafeBox->InstanceID = TEXT("Item_DefSafeBox");
+    DefSafeBox->TemplateID = TEXT("DefaultSafeBox");
+    DefSafeBox->Category = EItemCategory::SafeBox;
+    DefSafeBox->BaseSize = FIntPoint(2, 2); // 슬롯 크기 2x2
+    DefSafeBox->CurrentStack = 1;
+    DefSafeBox->MaxStack = 1;
+    EquipmentComponent->EquipItem(TEXT("SafeBox"), DefSafeBox);
+
+    // 기본 체스트 리그 장착 (4x3)
+    UItemInstance* DefRig = NewObject<UItemInstance>(this);
+    DefRig->InstanceID = TEXT("Item_DefRig");
+    DefRig->TemplateID = TEXT("DefaultRig");
+    DefRig->Category = EItemCategory::Rig;
+    DefRig->BaseSize = FIntPoint(2, 2); // 슬롯 모양 (예: 2x2)
+    DefRig->CurrentStack = 1;
+    DefRig->MaxStack = 1;
+    EquipmentComponent->EquipItem(TEXT("Rig"), DefRig);
+
+    auto CreateTestItem = [&](FName ID, FName TempID) -> UItemInstance* {
+        if (!ItemDataTable) return nullptr;
+        FItemData* Row = ItemDataTable->FindRow<FItemData>(TempID, TEXT("BeginPlay"));
+        if (!Row) return nullptr;
+
+        UItemInstance* Item = NewObject<UItemInstance>(this);
+        Item->InstanceID = ID;
+        Item->InitFromData(*Row);
+        Item->bIsExamined = true;
+        Item->bIsRotated = false;
+        return Item;
+    };
+
+    if (UItemInstance* Rifle = CreateTestItem(TEXT("TestRifle"), TEXT("M4A1")))
+        InventoryComponent->AddItem(Rifle, 0, 0);
+    if (UItemInstance* Ammo = CreateTestItem(TEXT("TestAmmo"), TEXT("Ammo_556_M995")))
+        InventoryComponent->AddItem(Ammo, 0, 2);
+    if (UItemInstance* Mag = CreateTestItem(TEXT("TestMag"), TEXT("Mag_M4")))
+        InventoryComponent->AddItem(Mag, 1, 2);
+    if (UItemInstance* Scope = CreateTestItem(TEXT("TestScope"), TEXT("Scope_ACOG")))
+        InventoryComponent->AddItem(Scope, 2, 2);
+    if (UItemInstance* Silencer = CreateTestItem(TEXT("TestSilencer"), TEXT("Muzzle_556")))
+        InventoryComponent->AddItem(Silencer, 2, 3);
 
     CurrentScore = 0;
     TotalTimeLimit = 60.0f;
@@ -68,36 +132,62 @@ void AGridGameMode::OnSearchPhaseComplete()
 {
     if (!LootContainerComponent) return;
 
-    // 더미 아이템 데이터 목록
-    static const FName Names[] = { TEXT("Sword"), TEXT("Shield"), TEXT("Potion"), TEXT("Axe"), TEXT("Gem"), TEXT("Diamond") };
-    static const FIntPoint Sizes[] = { FIntPoint(3, 1), FIntPoint(2, 2), FIntPoint(1, 1), FIntPoint(3, 2), FIntPoint(1, 1), FIntPoint(1, 1) };
-    static const EItemRarity Rarities[] = { 
-        EItemRarity::Common,    // Sword
-        EItemRarity::Uncommon,  // Shield 
-        EItemRarity::Common,    // Potion
-        EItemRarity::Legendary, // Axe
-        EItemRarity::Rare,      // Gem
-        EItemRarity::Mythic     // Diamond
-    };
-    
+    if (!ItemDataTable)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ItemDataTable is not assigned in GridGameMode!"));
+        return;
+    }
+
+    TArray<FItemData*> AllItems;
+    ItemDataTable->GetAllRows<FItemData>(TEXT("Loot"), AllItems);
+    if (AllItems.Num() == 0) return;
+
+    int32 TotalWeight = 0;
+    for (FItemData* ItemData : AllItems)
+    {
+        if (ItemData) TotalWeight += ItemData->DropWeight;
+    }
+
     static int32 SpawnCounter = 0;
 
-    // 4x4 상자 안에 3개의 아이템을 랜덤으로 욱여넣기 시도
-    int32 Attempts = 10;
+    // 6x6 상자 안에 5개의 아이템을 랜덤으로 욱여넣기 시도
+    int32 Attempts = 20;
     int32 AddedItems = 0;
 
-    while(Attempts > 0 && AddedItems < 3)
+    while(Attempts > 0 && AddedItems < 5)
     {
         Attempts--;
-        int32 RandIdx = FMath::RandRange(0, 5);
-        int32 RandX = FMath::RandRange(0, 3);
-        int32 RandY = FMath::RandRange(0, 3);
+        int32 RandX = FMath::RandRange(0, 5); 
+        int32 RandY = FMath::RandRange(0, 5);
         
-        FString UniqueName = FString::Printf(TEXT("%s_%d"), *Names[RandIdx].ToString(), SpawnCounter);
+        int32 RandWeight = FMath::RandRange(0, TotalWeight);
+        FItemData* SelectedItem = nullptr;
+        for (FItemData* ItemData : AllItems)
+        {
+            if (ItemData)
+            {
+                RandWeight -= ItemData->DropWeight;
+                if (RandWeight <= 0)
+                {
+                    SelectedItem = ItemData;
+                    break;
+                }
+            }
+        }
+        
+        if (!SelectedItem) continue;
+
+        FString UniqueName = FString::Printf(TEXT("%s_%d"), *SelectedItem->ItemID.ToString(), SpawnCounter);
         FName ItemID = FName(*UniqueName);
         
-        // bIsExamined = false 로 스폰! (실루엣 상태)
-        if (LootContainerComponent->AddItem(ItemID, RandX, RandY, Sizes[RandIdx].X, Sizes[RandIdx].Y, Rarities[RandIdx], false))
+        // 아이템 인스턴스 생성
+        UItemInstance* NewItem = NewObject<UItemInstance>(this);
+        NewItem->InstanceID = ItemID;
+        NewItem->InitFromData(*SelectedItem);
+        NewItem->bIsExamined = false;
+
+        // 스폰!
+        if (LootContainerComponent->AddItem(NewItem, RandX, RandY))
         {
             SpawnCounter++;
             AddedItems++;
@@ -126,12 +216,11 @@ void AGridGameMode::ProcessNextExamine()
 
     if (LootContainerComponent)
     {
-        // 강제로 해당 아이템의 식별 상태를 true로 변경
-        bool* bExaminedRef = LootContainerComponent->ItemExaminedMap.Find(TargetItem);
-        if (bExaminedRef)
+        // 인스턴스의 식별 상태를 true로 변경
+        if (UItemInstance* ItemObj = LootContainerComponent->GetItemInstance(TargetItem))
         {
-            *bExaminedRef = true;
-            // UI를 다시 그리도록 브로드캐스트
+            ItemObj->bIsExamined = true;
+            // UI 갱신
             LootContainerComponent->OnInventoryChanged.Broadcast();
         }
     }
