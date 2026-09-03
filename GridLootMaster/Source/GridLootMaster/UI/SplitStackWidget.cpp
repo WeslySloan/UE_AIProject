@@ -116,6 +116,13 @@ void USplitStackWidget::OnTextBoxTextChanged(const FText& Text)
 
 void USplitStackWidget::OnOkClicked()
 {
+    if (MaxStackToSplit < 1)
+    {
+        RemoveFromParent();
+        return;
+    }
+
+    CurrentSplitAmount = FMath::Clamp(CurrentSplitAmount, 1, MaxStackToSplit);
     OnSplitConfirmed.Broadcast(CurrentSplitAmount);
     RemoveFromParent();
 }

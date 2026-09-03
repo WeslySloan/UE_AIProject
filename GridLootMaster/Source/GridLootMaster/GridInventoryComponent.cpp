@@ -17,11 +17,12 @@ void UGridInventoryComponent::BeginPlay()
 
 void UGridInventoryComponent::InitializeGrid(int32 Width, int32 Height)
 {
-    GridWidth = Width;
-    GridHeight = Height;
+    GridWidth = FMath::Max(1, Width);
+    GridHeight = FMath::Max(1, Height);
     
     int32 TotalCells = GridWidth * GridHeight;
     GridCells.Init(NAME_None, TotalCells);
+    ItemInstances.Empty();
     
     OnInventoryChanged.Broadcast();
 }
@@ -38,6 +39,11 @@ int32 UGridInventoryComponent::GetIndex(int32 X, int32 Y) const
 
 bool UGridInventoryComponent::CheckItemFit(FName ItemID, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight) const
 {
+    if (ItemWidth <= 0 || ItemHeight <= 0)
+    {
+        return false;
+    }
+
     // 그리드 경계를 벗어나는지 확인
     if (StartX < 0 || StartY < 0 || (StartX + ItemWidth) > GridWidth || (StartY + ItemHeight) > GridHeight)
     {
@@ -67,11 +73,16 @@ bool UGridInventoryComponent::CheckItemFit(FName ItemID, int32 StartX, int32 Sta
 
 bool UGridInventoryComponent::FindEmptySpace(int32 ItemWidth, int32 ItemHeight, int32& OutX, int32& OutY) const
 {
+    return FindEmptySpaceExcluding(ItemWidth, ItemHeight, NAME_None, OutX, OutY);
+}
+
+bool UGridInventoryComponent::FindEmptySpaceExcluding(int32 ItemWidth, int32 ItemHeight, FName ExcludedItemID, int32& OutX, int32& OutY) const
+{
     for (int32 Y = 0; Y <= GridHeight - ItemHeight; ++Y)
     {
         for (int32 X = 0; X <= GridWidth - ItemWidth; ++X)
         {
-            if (CheckItemFit(NAME_None, X, Y, ItemWidth, ItemHeight))
+            if (CheckItemFit(ExcludedItemID, X, Y, ItemWidth, ItemHeight))
             {
                 OutX = X;
                 OutY = Y;
@@ -84,12 +95,33 @@ bool UGridInventoryComponent::FindEmptySpace(int32 ItemWidth, int32 ItemHeight, 
 
 bool UGridInventoryComponent::AddItem(UItemInstance* ItemObj, int32 StartX, int32 StartY)
 {
-    if (!ItemObj) return false;
+    if (!ItemObj || ItemObj->InstanceID == NAME_None) return false;
+
+    if (UItemInstance* const* ExistingItem = ItemInstances.Find(ItemObj->InstanceID))
+    {
+        if (*ExistingItem && *ExistingItem != ItemObj)
+        {
+            return false;
+        }
+    }
 
     FIntPoint Size = ItemObj->GetCurrentSize();
     if (!CheckItemFit(ItemObj->InstanceID, StartX, StartY, Size.X, Size.Y))
     {
         return false;
+    }
+
+    // 동일한 인스턴스를 다시 배치할 때 기존 점유 셀이 남지 않도록 정리합니다.
+    if (ItemInstances.Contains(ItemObj->InstanceID))
+    {
+        for (FName& CellItemID : GridCells)
+        {
+            if (CellItemID == ItemObj->InstanceID)
+            {
+                CellItemID = NAME_None;
+            }
+        }
+        ItemInstances.Remove(ItemObj->InstanceID);
     }
 
     for (int32 X = StartX; X < StartX + Size.X; ++X)
@@ -109,8 +141,10 @@ bool UGridInventoryComponent::AddItem(UItemInstance* ItemObj, int32 StartX, int3
     return true;
 }
 
-void UGridInventoryComponent::RemoveItem(FName ItemID)
+bool UGridInventoryComponent::RemoveItem(FName ItemID)
 {
+    if (ItemID == NAME_None) return false;
+
     bool bRemoved = false;
     for (int32 i = 0; i < GridCells.Num(); ++i)
     {
@@ -126,6 +160,8 @@ void UGridInventoryComponent::RemoveItem(FName ItemID)
         ItemInstances.Remove(ItemID);
         OnInventoryChanged.Broadcast();
     }
+
+    return bRemoved;
 }
 
 void UGridInventoryComponent::ClearInventory()
@@ -152,7 +188,7 @@ bool UGridInventoryComponent::TryMergeItem(UItemInstance* SourceItem, FName Targ
     if (!SourceItem) return false;
 
     UItemInstance* TargetItem = GetItemInstance(TargetItemID);
-    if (!TargetItem) return false;
+    if (!TargetItem || TargetItem == SourceItem || SourceItem->CurrentStack <= 0) return false;
 
     // 종류가 같고 스택 가능할 때만 병합
     if (SourceItem->TemplateID == TargetItem->TemplateID && TargetItem->IsStackable())
@@ -166,8 +202,8 @@ bool UGridInventoryComponent::TryMergeItem(UItemInstance* SourceItem, FName Targ
 
             OnInventoryChanged.Broadcast();
             
-            // SourceItem이 완전히 다 비워졌다면 true 반환 (호출부에서 아이템 제거를 처리하도록 유도)
-            return (SourceItem->CurrentStack <= 0);
+            // 일부라도 이동되었으면 병합 처리 완료로 반환합니다.
+            return (AmountToMove > 0);
         }
     }
     return false;

@@ -17,7 +17,7 @@ public:
     virtual bool Initialize() override;
 
     UFUNCTION(BlueprintCallable, Category = "Context Menu")
-    void Setup(class UItemInstance* InItemObj, FVector2D ScreenPos);
+    void Setup(class UItemInstance* InItemObj, FVector2D ScreenPos, bool bCanUnequip = false);
 
     UPROPERTY(BlueprintAssignable, Category = "Context Menu")
     FOnInspectClicked OnInspectClicked;

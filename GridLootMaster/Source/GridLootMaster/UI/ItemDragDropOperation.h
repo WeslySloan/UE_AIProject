@@ -30,4 +30,10 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag and Drop")
     class UGridInventoryComponent* SourceInventory = nullptr;
+
+    UPROPERTY()
+    class UModSlotWidget* SourceModSlot = nullptr;
+
+    UPROPERTY()
+    FName SourceEquipmentSlot = NAME_None;
 };

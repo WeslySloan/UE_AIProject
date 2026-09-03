@@ -61,7 +61,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
     }
 
     UItemDragDropOperation* ItemDropOp = Cast<UItemDragDropOperation>(InOperation);
-    if (ItemDropOp && InventoryComponent)
+    if (ItemDropOp && ItemDropOp->ItemObj && InventoryComponent)
     {
         int32 GridX = 0;
         int32 GridY = 0;
@@ -105,36 +105,50 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                     if (ExistingItem != NAME_None && ExistingItem != ItemDropOp->ItemID)
                     {
                         UItemInstance* ExistingItemObj = InventoryComponent->GetItemInstance(ExistingItem);
+                        if (!ExistingItemObj)
+                        {
+                            return false;
+                        }
                         
                         // 퀵 모딩 (부착물 -> 무기)
                         if (ItemDropOp->ItemObj->Category == EItemCategory::Attachment && ExistingItemObj && ExistingItemObj->Category == EItemCategory::Weapon)
                         {
                             AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
                             EAttachmentType ModType = ItemDropOp->ItemObj->AttachmentType;
-                            
-                            // 무기에 해당 슬롯이 비어있다면
-                            bool bAttached = false;
-                            if (ModType == EAttachmentType::Sight && !ExistingItemObj->EquippedSight)
+
+                            const bool bSlotAvailable =
+                                (ModType == EAttachmentType::Sight && !ExistingItemObj->EquippedSight) ||
+                                (ModType == EAttachmentType::Muzzle && !ExistingItemObj->EquippedMuzzle) ||
+                                (ModType == EAttachmentType::Magazine && !ExistingItemObj->EquippedMagazine);
+
+                            if (GM && GM->EquipmentComponent && bSlotAvailable)
                             {
-                                ExistingItemObj->EquippedSight = ItemDropOp->ItemObj;
-                                bAttached = true;
-                            }
-                            else if (ModType == EAttachmentType::Muzzle && !ExistingItemObj->EquippedMuzzle)
-                            {
-                                ExistingItemObj->EquippedMuzzle = ItemDropOp->ItemObj;
-                                bAttached = true;
-                            }
-                            else if (ModType == EAttachmentType::Magazine && !ExistingItemObj->EquippedMagazine)
-                            {
-                                ExistingItemObj->EquippedMagazine = ItemDropOp->ItemObj;
-                                bAttached = true;
-                            }
-                            
-                            if (bAttached)
-                            {
-                                if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemObj->InstanceID);
+                                bool bSourceRemoved = false;
+                                if (ItemDropOp->SourceInventory)
+                                {
+                                    if (ItemDropOp->SourceInventory->GetItemInstance(ItemDropOp->ItemID) == ItemDropOp->ItemObj)
+                                    {
+                                        bSourceRemoved = ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemObj->InstanceID);
+                                    }
+                                }
+                                else if (ItemDropOp->SourceModSlot)
+                                {
+                                    bSourceRemoved = true;
+                                }
+                                else
+                                {
+                                    bSourceRemoved = GM->EquipmentComponent->RemoveAttachedItem(ItemDropOp->ItemObj);
+                                }
+
+                                if (!bSourceRemoved) return false;
+
+                                if (ModType == EAttachmentType::Sight) ExistingItemObj->EquippedSight = ItemDropOp->ItemObj;
+                                else if (ModType == EAttachmentType::Muzzle) ExistingItemObj->EquippedMuzzle = ItemDropOp->ItemObj;
+                                else if (ModType == EAttachmentType::Magazine) ExistingItemObj->EquippedMagazine = ItemDropOp->ItemObj;
+
                                 if (ItemDropOp->OriginalWidget) ItemDropOp->OriginalWidget->RemoveFromParent();
                                 
+                                ExistingItemObj->OnItemModified.Broadcast();
                                 RefreshGridUI();
                                 if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->OnInventoryChanged.Broadcast();
                                 return true;
@@ -142,8 +156,14 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                         }
                         
                         // 탄약 삽탄 로직 추가 (드래그 대상이 탄약인 경우)
-                        if (ItemDropOp->ItemObj->TemplateID.ToString().Contains("Ammo"))
+                        if (ItemDropOp->ItemObj->Category == EItemCategory::Consumable)
                         {
+                            if (!ItemDropOp->SourceInventory ||
+                                ItemDropOp->SourceInventory->GetItemInstance(ItemDropOp->ItemID) != ItemDropOp->ItemObj)
+                            {
+                                return false;
+                            }
+
                             UItemInstance* TargetMag = nullptr;
                             if (ExistingItemObj->Category == EItemCategory::Attachment && ExistingItemObj->AttachmentType == EAttachmentType::Magazine)
                             {
@@ -154,18 +174,30 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                                 TargetMag = ExistingItemObj->EquippedMagazine;
                             }
 
-                            if (TargetMag && TargetMag->CurrentAmmo < TargetMag->MaxAmmo)
+                            if (TargetMag && TargetMag->IsCompatibleAmmo(ItemDropOp->ItemObj) && TargetMag->CurrentAmmo < TargetMag->MaxAmmo)
                             {
                                 int32 AvailableSpace = TargetMag->MaxAmmo - TargetMag->CurrentAmmo;
                                 int32 AmountToLoad = FMath::Min(ItemDropOp->ItemObj->CurrentStack, AvailableSpace);
                                 
                                 TargetMag->CurrentAmmo += AmountToLoad;
                                 ItemDropOp->ItemObj->CurrentStack -= AmountToLoad;
+                                TargetMag->OnItemModified.Broadcast();
+                                if (ExistingItemObj != TargetMag)
+                                {
+                                    ExistingItemObj->OnItemModified.Broadcast();
+                                }
                                 
                                 bool bAmmoDepleted = (ItemDropOp->ItemObj->CurrentStack <= 0);
                                 if (bAmmoDepleted)
                                 {
-                                    if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemObj->InstanceID);
+                                    if (!ItemDropOp->SourceInventory ||
+                                        ItemDropOp->SourceInventory->GetItemInstance(ItemDropOp->ItemID) != ItemDropOp->ItemObj ||
+                                        !ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemObj->InstanceID))
+                                    {
+                                        TargetMag->CurrentAmmo -= AmountToLoad;
+                                        ItemDropOp->ItemObj->CurrentStack += AmountToLoad;
+                                        return false;
+                                    }
                                     if (ItemDropOp->OriginalWidget) ItemDropOp->OriginalWidget->RemoveFromParent();
                                 }
                                 
@@ -175,36 +207,74 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                             }
                         }
 
+                        if (ItemDropOp->SourceInventory &&
+                            (ItemDropOp->ItemObj->InstanceID != ItemDropOp->ItemID ||
+                             ItemDropOp->SourceInventory->GetItemInstance(ItemDropOp->ItemID) != ItemDropOp->ItemObj))
+                        {
+                            return false;
+                        }
+
+                        const int32 SourceStackBeforeMerge = ItemDropOp->ItemObj->CurrentStack;
+                        const int32 TargetStackBeforeMerge = ExistingItemObj->CurrentStack;
                         if (InventoryComponent->TryMergeItem(ItemDropOp->ItemObj, ExistingItem))
-                {
-                    // 완전 병합되어 남은 수량이 0이 된 경우 (원본 제거)
-                    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
-                    if (GM)
-                    {
-                        if (GM->InventoryComponent) GM->InventoryComponent->RemoveItem(ItemDropOp->ItemID);
-                        if (GM->LootContainerComponent) GM->LootContainerComponent->RemoveItem(ItemDropOp->ItemID);
-                        if (GM->EquipmentComponent) GM->EquipmentComponent->RemoveItemByInstanceID(ItemDropOp->ItemID);
-                        if (GM->SafeBoxComponent) GM->SafeBoxComponent->RemoveItem(ItemDropOp->ItemID);
-                        if (GM->RigComponent) GM->RigComponent->RemoveItem(ItemDropOp->ItemID);
-                        if (GM->PocketComponent) GM->PocketComponent->RemoveItem(ItemDropOp->ItemID);
-                    }
-                    if (ItemDropOp->OriginalWidget)
-                    {
-                        ItemDropOp->OriginalWidget->RemoveFromParent();
-                    }
-                }
-                // 부분 병합이든 완전 병합이든 UI를 갱신하고 드롭 처리 완료
-                // (부분 병합 시에는 원본 아이템이 계속 원래 자리에 남아있고 UI의 스택 숫자만 갱신됨)
-                RefreshGridUI();
-                
-                // 원본 인벤토리(상자 등) UI도 갱신해야 하므로 GameMode 등을 통해 전체 브로드캐스트 권장
-                AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
-                if (GM && GM->LootContainerComponent) GM->LootContainerComponent->OnInventoryChanged.Broadcast();
-                if (GM && GM->SafeBoxComponent) GM->SafeBoxComponent->OnInventoryChanged.Broadcast();
-                if (GM && GM->RigComponent) GM->RigComponent->OnInventoryChanged.Broadcast();
-                if (GM && GM->PocketComponent) GM->PocketComponent->OnInventoryChanged.Broadcast();
-                
-                return true;
+                        {
+                            // 완전 병합되어 남은 수량이 0이 된 경우에만 원본을 제거합니다.
+                            if (ItemDropOp->ItemObj->CurrentStack <= 0)
+                            {
+                                AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+                                bool bSourceRemoved = false;
+                                if (ItemDropOp->SourceInventory)
+                                {
+                                    if (ItemDropOp->SourceInventory->GetItemInstance(ItemDropOp->ItemID) == ItemDropOp->ItemObj)
+                                    {
+                                        bSourceRemoved = ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemObj->InstanceID);
+                                    }
+                                }
+                                else if (GM && GM->EquipmentComponent)
+                                {
+                                    bSourceRemoved = GM->EquipmentComponent->RemoveItemByInstanceID(ItemDropOp->ItemID);
+                                }
+                                else
+                                {
+                                    bSourceRemoved = true;
+                                }
+
+                                if (!bSourceRemoved)
+                                {
+                                    ExistingItemObj->CurrentStack = TargetStackBeforeMerge;
+                                    ItemDropOp->ItemObj->CurrentStack = SourceStackBeforeMerge;
+                                    ExistingItemObj->OnItemModified.Broadcast();
+                                    ItemDropOp->ItemObj->OnItemModified.Broadcast();
+                                    if (ItemDropOp->SourceInventory && ItemDropOp->SourceInventory != InventoryComponent)
+                                    {
+                                        ItemDropOp->SourceInventory->OnInventoryChanged.Broadcast();
+                                    }
+                                    return false;
+                                }
+                                if (ItemDropOp->OriginalWidget)
+                                {
+                                    ItemDropOp->OriginalWidget->RemoveFromParent();
+                                }
+                            }
+
+                            // 부분 병합이든 완전 병합이든 UI를 갱신하고 드롭 처리 완료
+                            // (부분 병합 시에는 원본 아이템이 계속 원래 자리에 남아있고 UI의 스택 숫자만 갱신됨)
+                            RefreshGridUI();
+                            if (ItemDropOp->SourceInventory)
+                            {
+                                ItemDropOp->SourceInventory->OnInventoryChanged.Broadcast();
+                            }
+
+                            // 원본 인벤토리(상자 등) UI도 갱신해야 하므로 GameMode 등을 통해 전체 브로드캐스트 권장
+                            AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+                            if (GM && GM->LootContainerComponent) GM->LootContainerComponent->OnInventoryChanged.Broadcast();
+                            if (GM && GM->SafeBoxComponent) GM->SafeBoxComponent->OnInventoryChanged.Broadcast();
+                            if (GM && GM->RigComponent) GM->RigComponent->OnInventoryChanged.Broadcast();
+                            if (GM && GM->PocketComponent) GM->PocketComponent->OnInventoryChanged.Broadcast();
+                            if (GM && GM->StashComponent) GM->StashComponent->OnInventoryChanged.Broadcast();
+
+                            return true;
+                        }
                     }
                 }
             }
@@ -213,22 +283,120 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
             if (InventoryComponent->CheckItemFit(ItemDropOp->ItemID, GridX, GridY, Width, Height))
             {
                 AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
-                if (GM)
+                bool bMoved = false;
+
+                if (ItemDropOp->SourceInventory &&
+                    ItemDropOp->SourceInventory->GetItemInstance(ItemDropOp->ItemID) != ItemDropOp->ItemObj)
                 {
-                    if (GM->InventoryComponent) GM->InventoryComponent->RemoveItem(ItemDropOp->ItemID);
-                    if (GM->LootContainerComponent) GM->LootContainerComponent->RemoveItem(ItemDropOp->ItemID);
-                    if (GM->EquipmentComponent) GM->EquipmentComponent->RemoveItemByInstanceID(ItemDropOp->ItemID);
-                    if (GM->SafeBoxComponent) GM->SafeBoxComponent->RemoveItem(ItemDropOp->ItemID);
-                    if (GM->RigComponent) GM->RigComponent->RemoveItem(ItemDropOp->ItemID);
-                    if (GM->PocketComponent) GM->PocketComponent->RemoveItem(ItemDropOp->ItemID);
+                    return false;
+                }
+
+                // 다른 인벤토리에서 이동할 때는 대상 추가를 먼저 성공시킨 뒤 원본을 제거합니다.
+                if (ItemDropOp->SourceInventory && ItemDropOp->SourceInventory != InventoryComponent)
+                {
+                    bMoved = InventoryComponent->AddItem(ItemDropOp->ItemObj, GridX, GridY);
+                    if (bMoved)
+                    {
+                        if (!ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemID))
+                        {
+                            InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                            bMoved = false;
+                        }
+                    }
+                }
+                else if (ItemDropOp->SourceInventory == InventoryComponent)
+                {
+                    int32 OriginalX = INDEX_NONE;
+                    int32 OriginalY = INDEX_NONE;
+                    for (int32 Y = 0; Y < InventoryComponent->GridHeight && OriginalY == INDEX_NONE; ++Y)
+                    {
+                        for (int32 X = 0; X < InventoryComponent->GridWidth; ++X)
+                        {
+                            const int32 OriginalIndex = InventoryComponent->GetIndex(X, Y);
+                            if (InventoryComponent->IsValidIndex(OriginalIndex) &&
+                                InventoryComponent->GridCells[OriginalIndex] == ItemDropOp->ItemID)
+                            {
+                                OriginalX = X;
+                                OriginalY = Y;
+                                break;
+                            }
+                        }
+                    }
+
+                    const bool bSourceRemoved = InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                    bMoved = bSourceRemoved && InventoryComponent->AddItem(ItemDropOp->ItemObj, GridX, GridY);
+                    if (!bMoved && OriginalX != INDEX_NONE)
+                    {
+                        // 새 위치 수납 실패 시 원래 위치로 복구합니다.
+                        InventoryComponent->AddItem(ItemDropOp->ItemObj, OriginalX, OriginalY);
+                    }
                 }
                 else
                 {
-                    InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                    UGridInventoryComponent* UnknownSourceInventory = nullptr;
+                    FName SourceEquipmentSlot = NAME_None;
+
+                    if (GM)
+                    {
+                        auto FindUnknownSource = [&](UGridInventoryComponent* Candidate)
+                        {
+                            if (!UnknownSourceInventory && Candidate && Candidate != InventoryComponent &&
+                                Candidate->GetItemInstance(ItemDropOp->ItemID) == ItemDropOp->ItemObj)
+                            {
+                                UnknownSourceInventory = Candidate;
+                            }
+                        };
+
+                        FindUnknownSource(GM->InventoryComponent);
+                        FindUnknownSource(GM->LootContainerComponent);
+                        FindUnknownSource(GM->SafeBoxComponent);
+                        FindUnknownSource(GM->RigComponent);
+                        FindUnknownSource(GM->PocketComponent);
+                        FindUnknownSource(GM->StashComponent);
+
+                        if (!UnknownSourceInventory && GM->EquipmentComponent)
+                        {
+                            for (const TPair<FName, UItemInstance*>& Pair : GM->EquipmentComponent->EquippedItems)
+                            {
+                                if (Pair.Value == ItemDropOp->ItemObj)
+                                {
+                                    SourceEquipmentSlot = Pair.Key;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (!ItemDropOp->SourceModSlot && SourceEquipmentSlot == NAME_None && !UnknownSourceInventory)
+                    {
+                        return false;
+                    }
+
+                    // 출처가 없는 드래그도 대상 추가를 먼저 성공시켜 실패 시 원본을 보존합니다.
+                    bMoved = InventoryComponent->AddItem(ItemDropOp->ItemObj, GridX, GridY);
+                    if (bMoved)
+                    {
+                        if (UnknownSourceInventory)
+                        {
+                            if (!UnknownSourceInventory->RemoveItem(ItemDropOp->ItemID))
+                            {
+                                InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                                bMoved = false;
+                            }
+                        }
+                        else if (GM && SourceEquipmentSlot != NAME_None)
+                        {
+                            if (!GM->EquipmentComponent->RemoveItemBySlotID(SourceEquipmentSlot))
+                            {
+                                InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                                bMoved = false;
+                            }
+                        }
+                    }
                 }
                 
                 // 새 위치에 아이템 추가
-                if (InventoryComponent->AddItem(ItemDropOp->ItemObj, GridX, GridY))
+                if (bMoved)
                 {
                     if (ItemDropOp->OriginalWidget)
                     {
@@ -239,6 +407,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                     if (GM && GM->SafeBoxComponent) GM->SafeBoxComponent->OnInventoryChanged.Broadcast();
                     if (GM && GM->RigComponent) GM->RigComponent->OnInventoryChanged.Broadcast();
                     if (GM && GM->PocketComponent) GM->PocketComponent->OnInventoryChanged.Broadcast();
+                    if (GM && GM->StashComponent) GM->StashComponent->OnInventoryChanged.Broadcast();
                     return true;
                 }
             }
@@ -258,7 +427,7 @@ bool UGridBoardWidget::NativeOnDragOver(const FGeometry& InGeometry, const FDrag
     Super::NativeOnDragOver(InGeometry, InDragDropEvent, InOperation);
 
     UItemDragDropOperation* ItemDropOp = Cast<UItemDragDropOperation>(InOperation);
-    if (ItemDropOp && InventoryComponent && PreviewBorder)
+    if (ItemDropOp && ItemDropOp->ItemObj && InventoryComponent && PreviewBorder)
     {
         int32 GridX = 0;
         int32 GridY = 0;
@@ -371,6 +540,11 @@ void UGridBoardWidget::RefreshGridUI()
         for (int X = 0; X < InventoryComponent->GridWidth; ++X)
         {
             int32 Index = InventoryComponent->GetIndex(X, Y);
+            if (!InventoryComponent->IsValidIndex(Index))
+            {
+                continue;
+            }
+
             FName ItemID = InventoryComponent->GridCells[Index];
 
             if (ItemID != NAME_None && !CheckedItems.Contains(ItemID))
@@ -394,6 +568,20 @@ void UGridBoardWidget::RefreshGridUI()
 void UGridBoardWidget::OnSplitDragConfirmed(int32 SplitAmount)
 {
     if (!PendingSplitItem || !PendingSplitSourceInv || !InventoryComponent) return;
+    if (PendingSplitSourceInv->GetItemInstance(PendingSplitItem->InstanceID) != PendingSplitItem)
+    {
+        PendingSplitItem = nullptr;
+        PendingSplitSourceInv = nullptr;
+        return;
+    }
+    if (PendingSplitItem->EquippedSight || PendingSplitItem->EquippedMuzzle || PendingSplitItem->EquippedMagazine)
+    {
+        return;
+    }
+
+    const int32 MaxSplitAmount = PendingSplitItem->CurrentStack - 1;
+    if (MaxSplitAmount < 1) return;
+    SplitAmount = FMath::Clamp(SplitAmount, 1, MaxSplitAmount);
 
     FIntPoint Size = PendingSplitItem->GetCurrentSize();
     int32 Width = Size.X;
@@ -431,24 +619,38 @@ void UGridBoardWidget::OnSplitDragConfirmed(int32 SplitAmount)
     }
 
     // 2. 빈 공간에 새로 아이템 생성하여 이동
-    if (InventoryComponent->CheckItemFit(PendingSplitItem->InstanceID, PendingSplitX, PendingSplitY, Width, Height))
+    if (InventoryComponent->CheckItemFit(NAME_None, PendingSplitX, PendingSplitY, Width, Height))
     {
         PendingSplitItem->CurrentStack -= SplitAmount;
 
         UItemInstance* NewItem = NewObject<UItemInstance>(InventoryComponent);
         NewItem->InstanceID = FName(*FGuid::NewGuid().ToString());
         NewItem->TemplateID = PendingSplitItem->TemplateID;
+        NewItem->ItemName = PendingSplitItem->ItemName;
         NewItem->Category = PendingSplitItem->Category;
+        NewItem->Rarity = PendingSplitItem->Rarity;
+        NewItem->ItemIcon = PendingSplitItem->ItemIcon;
+        NewItem->CachedDynamicIcon = PendingSplitItem->CachedDynamicIcon;
         NewItem->BaseSize = PendingSplitItem->BaseSize;
         NewItem->CurrentStack = SplitAmount;
         NewItem->MaxStack = PendingSplitItem->MaxStack;
         NewItem->bIsRotated = PendingSplitItem->bIsRotated;
         NewItem->bIsExamined = PendingSplitItem->bIsExamined;
         NewItem->AttachmentType = PendingSplitItem->AttachmentType;
+        NewItem->CompatibleAmmo = PendingSplitItem->CompatibleAmmo;
+        NewItem->CurrentAmmo = PendingSplitItem->CurrentAmmo;
+        NewItem->MaxAmmo = PendingSplitItem->MaxAmmo;
+        NewItem->Damage = PendingSplitItem->Damage;
+        NewItem->Armor = PendingSplitItem->Armor;
         NewItem->EquippedSight = PendingSplitItem->EquippedSight;
         NewItem->EquippedMuzzle = PendingSplitItem->EquippedMuzzle;
+        NewItem->EquippedMagazine = PendingSplitItem->EquippedMagazine;
 
-        InventoryComponent->AddItem(NewItem, PendingSplitX, PendingSplitY);
+        if (!InventoryComponent->AddItem(NewItem, PendingSplitX, PendingSplitY))
+        {
+            PendingSplitItem->CurrentStack += SplitAmount;
+            return;
+        }
 
         PendingSplitSourceInv->OnInventoryChanged.Broadcast();
         InventoryComponent->OnInventoryChanged.Broadcast();

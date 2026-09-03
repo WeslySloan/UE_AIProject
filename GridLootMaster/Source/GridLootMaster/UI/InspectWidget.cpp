@@ -11,6 +11,7 @@
 #include "Components/CanvasPanelSlot.h"
 #include "Components/SizeBox.h"
 #include "Blueprint/WidgetTree.h"
+#include "Fonts/CompositeFont.h"
 
 bool UInspectWidget::Initialize()
 {
@@ -45,7 +46,12 @@ bool UInspectWidget::Initialize()
 
         TitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         TitleText->SetText(FText::FromString("Item Name"));
-        TitleText->SetFont(FSlateFontInfo(FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Bold.ttf"), 16));
+        TSharedPtr<const FCompositeFont> BoldFont = MakeShared<FStandaloneCompositeFont>(
+            NAME_None,
+            FPaths::EngineContentDir() / TEXT("Slate/Fonts/Roboto-Bold.ttf"),
+            EFontHinting::Default,
+            EFontLoadingPolicy::LazyLoad);
+        TitleText->SetFont(FSlateFontInfo(BoldFont, 16));
         TopBar->AddChild(TitleText);
 
         UButton* CloseButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
@@ -127,6 +133,7 @@ void UInspectWidget::Setup(UItemInstance* InItemObj)
     }
     
     TargetItem->bIsExamined = true;
+    TargetItem->OnItemModified.Broadcast();
 }
 
 void UInspectWidget::OnCloseClicked()

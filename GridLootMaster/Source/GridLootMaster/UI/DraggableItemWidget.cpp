@@ -26,9 +26,17 @@ void UDraggableItemWidget::NativeConstruct()
     SetIsFocusable(true); 
 }
 
+void UDraggableItemWidget::HandleItemModified()
+{
+    InitWidgetUI(SourceInventory == nullptr);
+}
+
 void UDraggableItemWidget::InitWidgetUI(bool bEquipped)
 {
     if (!WidgetTree || !ItemObj) return;
+
+    ItemObj->OnItemModified.RemoveDynamic(this, &UDraggableItemWidget::HandleItemModified);
+    ItemObj->OnItemModified.AddUniqueDynamic(this, &UDraggableItemWidget::HandleItemModified);
 
     if (!WidgetTree->RootWidget)
     {
@@ -286,6 +294,12 @@ FReply UDraggableItemWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, 
 void UDraggableItemWidget::OnAutoSplitConfirmed(int32 SplitAmount)
 {
     if (!ItemObj || !SourceInventory) return;
+    if (SourceInventory->GetItemInstance(ItemObj->InstanceID) != ItemObj) return;
+    if (ItemObj->EquippedSight || ItemObj->EquippedMuzzle || ItemObj->EquippedMagazine) return;
+
+    const int32 MaxSplitAmount = ItemObj->CurrentStack - 1;
+    if (MaxSplitAmount < 1) return;
+    SplitAmount = FMath::Clamp(SplitAmount, 1, MaxSplitAmount);
 
     FIntPoint Size = ItemObj->GetCurrentSize();
     int32 FreeX, FreeY;
@@ -298,25 +312,40 @@ void UDraggableItemWidget::OnAutoSplitConfirmed(int32 SplitAmount)
         UItemInstance* NewItem = NewObject<UItemInstance>(SourceInventory);
         NewItem->InstanceID = FName(*FGuid::NewGuid().ToString());
         NewItem->TemplateID = ItemObj->TemplateID;
+        NewItem->ItemName = ItemObj->ItemName;
         NewItem->Category = ItemObj->Category;
+        NewItem->Rarity = ItemObj->Rarity;
+        NewItem->ItemIcon = ItemObj->ItemIcon;
+        NewItem->CachedDynamicIcon = ItemObj->CachedDynamicIcon;
         NewItem->BaseSize = ItemObj->BaseSize;
         NewItem->CurrentStack = SplitAmount;
         NewItem->MaxStack = ItemObj->MaxStack;
         NewItem->bIsRotated = ItemObj->bIsRotated;
         NewItem->bIsExamined = ItemObj->bIsExamined;
         NewItem->AttachmentType = ItemObj->AttachmentType;
+        NewItem->CompatibleAmmo = ItemObj->CompatibleAmmo;
+        NewItem->CurrentAmmo = ItemObj->CurrentAmmo;
+        NewItem->MaxAmmo = ItemObj->MaxAmmo;
+        NewItem->Damage = ItemObj->Damage;
+        NewItem->Armor = ItemObj->Armor;
         NewItem->EquippedSight = ItemObj->EquippedSight;
         NewItem->EquippedMuzzle = ItemObj->EquippedMuzzle;
+        NewItem->EquippedMagazine = ItemObj->EquippedMagazine;
 
         // 3. 인벤토리에 추가 (자동으로 브로드캐스트 안될수있으므로 수동호출)
-        SourceInventory->AddItem(NewItem, FreeX, FreeY);
+        if (!SourceInventory->AddItem(NewItem, FreeX, FreeY))
+        {
+            ItemObj->CurrentStack += SplitAmount;
+            return;
+        }
         SourceInventory->OnInventoryChanged.Broadcast();
     }
 }
 
 void UDraggableItemWidget::HandleInspectItem(UItemInstance* TargetItem)
 {
-    if (TargetItem)
+    if (TargetItem && (!SourceInventory ||
+        SourceInventory->GetItemInstance(TargetItem->InstanceID) == TargetItem))
     {
         UInspectWidget* InspectUI = CreateWidget<UInspectWidget>(GetWorld(), UInspectWidget::StaticClass());
         if (InspectUI)
@@ -329,7 +358,8 @@ void UDraggableItemWidget::HandleInspectItem(UItemInstance* TargetItem)
 
 void UDraggableItemWidget::HandleDiscardItem(UItemInstance* TargetItem)
 {
-    if (TargetItem && SourceInventory)
+    if (TargetItem && SourceInventory &&
+        SourceInventory->GetItemInstance(TargetItem->InstanceID) == TargetItem)
     {
         SourceInventory->RemoveItem(TargetItem->InstanceID);
     }
@@ -371,13 +401,48 @@ FReply UDraggableItemWidget::NativeOnKeyDown(const FGeometry& InGeometry, const 
 {
     if (InKeyEvent.GetKey() == EKeys::R && ItemObj)
     {
-        ItemObj->bIsRotated = !ItemObj->bIsRotated;
-        
-        InitWidgetUI();
-        
-        if (CurrentDragVisual)
+        if (SourceInventory)
         {
-            CurrentDragVisual->InitWidgetUI();
+            if (SourceInventory->GetItemInstance(ItemObj->InstanceID) != ItemObj)
+            {
+                return FReply::Handled();
+            }
+
+            int32 CurrentX = INDEX_NONE;
+            int32 CurrentY = INDEX_NONE;
+            for (int32 Y = 0; Y < SourceInventory->GridHeight && CurrentY == INDEX_NONE; ++Y)
+            {
+                for (int32 X = 0; X < SourceInventory->GridWidth; ++X)
+                {
+                    const int32 CellIndex = SourceInventory->GetIndex(X, Y);
+                    if (SourceInventory->IsValidIndex(CellIndex) &&
+                        SourceInventory->GridCells[CellIndex] == ItemObj->InstanceID)
+                    {
+                        CurrentX = X;
+                        CurrentY = Y;
+                        break;
+                    }
+                }
+            }
+
+            if (CurrentX == INDEX_NONE || CurrentY == INDEX_NONE)
+            {
+                return FReply::Handled();
+            }
+
+            const FIntPoint RotatedSize(ItemObj->GetCurrentSize().Y, ItemObj->GetCurrentSize().X);
+            if (!SourceInventory->CheckItemFit(ItemObj->InstanceID, CurrentX, CurrentY, RotatedSize.X, RotatedSize.Y))
+            {
+                return FReply::Handled();
+            }
+        }
+
+        ItemObj->bIsRotated = !ItemObj->bIsRotated;
+
+        ItemObj->OnItemModified.Broadcast();
+        if (SourceInventory)
+        {
+            SourceInventory->OnInventoryChanged.Broadcast();
         }
 
         OnItemRotated();
@@ -394,6 +459,11 @@ void UDraggableItemWidget::HandleUnloadItem(UItemInstance* TargetItem)
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
     if (!GM || !GM->ItemDataTable) return;
 
+    if (SourceInventory && SourceInventory->GetItemInstance(TargetItem->InstanceID) != TargetItem)
+    {
+        return;
+    }
+
     // 1. 무기인 경우: 결합된 탄창을 분리하여 인벤토리에 넣음
     if (TargetItem->Category == EItemCategory::Weapon && TargetItem->EquippedMagazine)
     {
@@ -403,18 +473,17 @@ void UDraggableItemWidget::HandleUnloadItem(UItemInstance* TargetItem)
         bool bAdded = false;
         if (SourceInventory && SourceInventory->FindEmptySpace(MagItem->GetCurrentSize().X, MagItem->GetCurrentSize().Y, FreeX, FreeY))
         {
-            SourceInventory->AddItem(MagItem, FreeX, FreeY);
-            bAdded = true;
+            bAdded = SourceInventory->AddItem(MagItem, FreeX, FreeY);
         }
         else if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpace(MagItem->GetCurrentSize().X, MagItem->GetCurrentSize().Y, FreeX, FreeY))
         {
-            GM->InventoryComponent->AddItem(MagItem, FreeX, FreeY);
-            bAdded = true;
+            bAdded = GM->InventoryComponent->AddItem(MagItem, FreeX, FreeY);
         }
 
         if (bAdded)
         {
             TargetItem->EquippedMagazine = nullptr;
+            TargetItem->OnItemModified.Broadcast();
             InitWidgetUI(SourceInventory == nullptr);
             if (SourceInventory) SourceInventory->OnInventoryChanged.Broadcast();
             else if (GM->InventoryComponent) GM->InventoryComponent->OnInventoryChanged.Broadcast();
@@ -427,41 +496,44 @@ void UDraggableItemWidget::HandleUnloadItem(UItemInstance* TargetItem)
     {
         if (TargetItem->CurrentAmmo <= 0) return;
 
-        FName AmmoID = TEXT("Ammo_556_M995");
-        if (TargetItem->TemplateID == TEXT("Mag_M4"))
-        {
-            AmmoID = TEXT("Ammo_556_M995");
-        }
+        FName AmmoID = GM->FindCompatibleAmmoID(TargetItem);
+        if (AmmoID == NAME_None) return;
         
         FItemData* AmmoData = GM->ItemDataTable->FindRow<FItemData>(AmmoID, TEXT("Unload"));
         if (!AmmoData) return;
+        if (AmmoData->MaxStack <= 0) return;
 
         int32 AmmoAmount = TargetItem->CurrentAmmo;
-        TargetItem->CurrentAmmo = 0;
 
         while (AmmoAmount > 0)
         {
             int32 StackToSpawn = FMath::Min(AmmoAmount, AmmoData->MaxStack);
-            AmmoAmount -= StackToSpawn;
 
             UItemInstance* NewAmmo = NewObject<UItemInstance>(GM);
-            NewAmmo->InstanceID = FName(*FString::Printf(TEXT("%s_Unloaded_%d"), *AmmoID.ToString(), FMath::RandRange(10000, 99999)));
+            NewAmmo->InstanceID = FName(*FString::Printf(TEXT("%s_Unloaded_%s"), *AmmoID.ToString(), *FGuid::NewGuid().ToString(EGuidFormats::Digits)));
             NewAmmo->InitFromData(*AmmoData);
             NewAmmo->CurrentStack = StackToSpawn;
             NewAmmo->bIsExamined = true;
             NewAmmo->bIsRotated = false;
 
             int32 FreeX, FreeY;
+            bool bAdded = false;
             if (SourceInventory && SourceInventory->FindEmptySpace(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeX, FreeY))
             {
-                SourceInventory->AddItem(NewAmmo, FreeX, FreeY);
+                bAdded = SourceInventory->AddItem(NewAmmo, FreeX, FreeY);
             }
             else if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpace(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeX, FreeY))
             {
-                GM->InventoryComponent->AddItem(NewAmmo, FreeX, FreeY);
+                bAdded = GM->InventoryComponent->AddItem(NewAmmo, FreeX, FreeY);
             }
+
+            if (!bAdded) break;
+            AmmoAmount -= StackToSpawn;
         }
 
+        TargetItem->CurrentAmmo = AmmoAmount;
+
+        TargetItem->OnItemModified.Broadcast();
         InitWidgetUI(SourceInventory == nullptr);
         if (SourceInventory) SourceInventory->OnInventoryChanged.Broadcast();
         else if (GM->InventoryComponent) GM->InventoryComponent->OnInventoryChanged.Broadcast();

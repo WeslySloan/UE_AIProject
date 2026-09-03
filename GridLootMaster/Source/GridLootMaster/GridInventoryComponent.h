@@ -58,6 +58,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Inventory")
     bool FindEmptySpace(int32 ItemWidth, int32 ItemHeight, int32& OutX, int32& OutY) const;
 
+    // 특정 아이템이 차지한 칸을 비어 있는 것으로 간주하고 빈 공간을 찾습니다.
+    bool FindEmptySpaceExcluding(int32 ItemWidth, int32 ItemHeight, FName ExcludedItemID, int32& OutX, int32& OutY) const;
+
     // 아이템 인스턴스를 인벤토리에 추가합니다.
     UFUNCTION(BlueprintCallable, Category = "Inventory")
     bool AddItem(class UItemInstance* ItemObj, int32 StartX, int32 StartY);
@@ -72,7 +75,7 @@ public:
 
     // 아이템을 인벤토리에서 제거합니다.
     UFUNCTION(BlueprintCallable, Category = "Inventory")
-    void RemoveItem(FName ItemID);
+    bool RemoveItem(FName ItemID);
 
     // 인벤토리를 비웁니다.
     UFUNCTION(BlueprintCallable, Category = "Inventory")

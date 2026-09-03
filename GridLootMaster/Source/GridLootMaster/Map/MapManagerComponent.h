@@ -24,6 +24,18 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Map Data")
     int32 MapHeight;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Extraction")
+    FIntPoint SpawnPoint;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Extraction")
+    int32 ExtractionPointCount;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Extraction")
+    int32 ExtractionMinDistance;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Extraction")
+    TArray<FIntPoint> ExtractionPoints;
+
     // 맵을 초기화하고 타일 엣지 정보를 설정합니다.
     UFUNCTION(BlueprintCallable, Category = "Map Data")
     void InitializeMap();
@@ -31,6 +43,9 @@ public:
     // 특정 좌표의 타일 정보 반환
     UFUNCTION(BlueprintCallable, Category = "Map Data")
     bool GetTileData(int32 X, int32 Y, FTileData& OutTileData) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Extraction")
+    bool IsExtractionPoint(FIntPoint Coordinate) const;
     
     // 두 타일 사이의 이동 가능 여부 체크
     UFUNCTION(BlueprintCallable, Category = "Map Data")
@@ -46,4 +61,5 @@ protected:
     // 내부 헬퍼 함수
     int32 GetIndex(int32 X, int32 Y) const;
     ETileZone DetermineZone(int32 X, int32 Y) const;
+    void GenerateExtractionPoints();
 };

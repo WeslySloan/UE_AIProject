@@ -8,11 +8,19 @@ UEquipmentComponent::UEquipmentComponent()
 
 bool UEquipmentComponent::EquipItem(FName SlotID, UItemInstance* Item)
 {
-    if (!Item) return false;
+    if (!Item || SlotID == NAME_None || Item->InstanceID == NAME_None) return false;
 
     if (EquippedItems.Contains(SlotID))
     {
         return false; // 이미 장착됨
+    }
+
+    for (const TPair<FName, UItemInstance*>& Pair : EquippedItems)
+    {
+        if (Pair.Value && Pair.Value->InstanceID == Item->InstanceID)
+        {
+            return false; // 동일 인스턴스는 여러 슬롯에 장착할 수 없음
+        }
     }
 
     EquippedItems.Add(SlotID, Item);
@@ -29,7 +37,7 @@ UItemInstance* UEquipmentComponent::GetEquippedItem(FName SlotID) const
     return nullptr;
 }
 
-void UEquipmentComponent::RemoveItemByInstanceID(FName InstanceID)
+bool UEquipmentComponent::RemoveItemByInstanceID(FName InstanceID)
 {
     bool bRemoved = false;
     for (auto It = EquippedItems.CreateIterator(); It; ++It)
@@ -46,14 +54,58 @@ void UEquipmentComponent::RemoveItemByInstanceID(FName InstanceID)
     {
         OnEquipmentChanged.Broadcast();
     }
+    return bRemoved;
 }
 
-void UEquipmentComponent::RemoveItemBySlotID(FName SlotID)
+bool UEquipmentComponent::RemoveAttachedItem(UItemInstance* Attachment)
 {
-    if (EquippedItems.Remove(SlotID) > 0)
+    if (!Attachment) return false;
+
+    bool bRemoved = false;
+    for (const TPair<FName, UItemInstance*>& Pair : EquippedItems)
+    {
+        UItemInstance* EquippedItem = Pair.Value;
+        if (!EquippedItem || EquippedItem->Category != EItemCategory::Weapon) continue;
+
+        bool bWeaponModified = false;
+        if (EquippedItem->EquippedSight == Attachment)
+        {
+            EquippedItem->EquippedSight = nullptr;
+            bWeaponModified = true;
+        }
+        if (EquippedItem->EquippedMuzzle == Attachment)
+        {
+            EquippedItem->EquippedMuzzle = nullptr;
+            bWeaponModified = true;
+        }
+        if (EquippedItem->EquippedMagazine == Attachment)
+        {
+            EquippedItem->EquippedMagazine = nullptr;
+            bWeaponModified = true;
+        }
+
+        if (bWeaponModified)
+        {
+            EquippedItem->OnItemModified.Broadcast();
+            bRemoved = true;
+        }
+    }
+
+    if (bRemoved)
     {
         OnEquipmentChanged.Broadcast();
     }
+    return bRemoved;
+}
+
+bool UEquipmentComponent::RemoveItemBySlotID(FName SlotID)
+{
+    const bool bRemoved = EquippedItems.Remove(SlotID) > 0;
+    if (bRemoved)
+    {
+        OnEquipmentChanged.Broadcast();
+    }
+    return bRemoved;
 }
 
 void UEquipmentComponent::ClearEquipment()

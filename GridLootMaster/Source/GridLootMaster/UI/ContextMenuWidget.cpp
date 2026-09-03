@@ -44,7 +44,7 @@ bool UContextMenuWidget::Initialize()
         DiscardButton->OnClicked.AddDynamic(this, &UContextMenuWidget::HandleDiscardClicked);
         MenuContainer->AddChild(DiscardButton);
         
-        UnequipButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass());
+        UnequipButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("UnequipButton"));
         UTextBlock* UnequipText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         UnequipText->SetText(FText::FromString("Unequip"));
         UnequipText->SetColorAndOpacity(FLinearColor::Black);
@@ -63,9 +63,14 @@ bool UContextMenuWidget::Initialize()
     return true;
 }
 
-void UContextMenuWidget::Setup(UItemInstance* InItemObj, FVector2D ScreenPos)
+void UContextMenuWidget::Setup(UItemInstance* InItemObj, FVector2D ScreenPos, bool bCanUnequip)
 {
     TargetItem = InItemObj;
+    if (UnequipButton)
+    {
+        UnequipButton->SetVisibility(bCanUnequip ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    }
+
     if (MenuContainer)
     {
         if (UCanvasPanelSlot* MenuSlot = Cast<UCanvasPanelSlot>(MenuContainer->Slot))

@@ -100,6 +100,12 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
     TSoftObjectPtr<UTexture2D> ItemIcon;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    int32 Damage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    int32 Armor;
+
     FItemData()
         : ItemID(NAME_None)
         , ItemName(TEXT("Unknown"))
@@ -112,5 +118,7 @@ public:
         , Value(0)
         , DropWeight(100)
         , Weight(1.0f)
+        , Damage(0)
+        , Armor(0)
     {}
 };

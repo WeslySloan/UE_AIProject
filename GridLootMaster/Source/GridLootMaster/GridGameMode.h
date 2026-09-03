@@ -6,11 +6,22 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnGameStateChanged);
 
+UENUM(BlueprintType)
+enum class ERaidState : uint8
+{
+    Lobby       UMETA(DisplayName = "Lobby"),
+    InRaid      UMETA(DisplayName = "In Raid"),
+    Succeeded   UMETA(DisplayName = "Succeeded"),
+    Failed      UMETA(DisplayName = "Failed")
+};
+
 class UGridInventoryComponent;
 class UEquipmentComponent;
 class UMainGameUI;
+class UItemInstance;
 class UItemDataTable;
 class UMapManagerComponent;
+class UCombatComponent;
 
 UCLASS()
 class GRIDLOOTMASTER_API AGridGameMode : public AGameModeBase
@@ -45,6 +56,18 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Game Rules")
     int32 QuotaScore;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    int32 MaxHealth;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+    int32 CurrentHealth;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Raid")
+    ERaidState RaidState;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Map")
+    FIntPoint CurrentPlayerCoord;
+
     UPROPERTY(BlueprintAssignable, Category = "Game|Events")
     FOnGameStateChanged OnGameStateChanged;
 
@@ -53,6 +76,39 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Game")
     void CheckWinCondition();
+
+    FName FindCompatibleAmmoID(const UItemInstance* Magazine) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Raid")
+    void SetRaidState(ERaidState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Raid")
+    bool StartRaid();
+
+    UFUNCTION(BlueprintCallable, Category = "Stash")
+    bool SaveStash();
+
+    UFUNCTION(BlueprintCallable, Category = "Stash")
+    bool LoadStash();
+
+    UFUNCTION(BlueprintCallable, Category = "Raid")
+    bool ExtractRaid();
+
+    UFUNCTION(BlueprintCallable, Category = "Raid")
+    bool IsAtExtractionPoint() const;
+
+    UFUNCTION(BlueprintCallable, Category = "Raid")
+    void FailRaid();
+
+#if WITH_DEV_AUTOMATION_TESTS
+    void GameTimerUpdateForTest();
+    void SearchPhaseCompleteForTest();
+#endif
+
+    FName MakeUniqueInstanceID(FName PreferredID) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void ApplyPlayerDamage(int32 DamageAmount);
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
     class UGridInventoryComponent* InventoryComponent;
@@ -73,8 +129,23 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
     class UGridInventoryComponent* PocketComponent;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stash")
+    class UGridInventoryComponent* StashComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stash")
+    FString StashSaveSlot;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
     class UEquipmentComponent* EquipmentComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+    UCombatComponent* CombatComponent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    int32 EncounterChancePercent = 25;
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void HandlePlayerMoved(FIntPoint NewCoordinate);
 
     // [탐색] 버튼을 눌렀을 때 서칭 시퀀스 시작
     UFUNCTION()

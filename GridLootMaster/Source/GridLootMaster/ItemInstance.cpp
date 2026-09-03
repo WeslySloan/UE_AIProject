@@ -11,6 +11,8 @@ UItemInstance::UItemInstance()
     TemplateID = NAME_None;
     Rarity = EItemRarity::Common;
     Category = EItemCategory::Valuable;
+    ItemIcon = nullptr;
+    CachedDynamicIcon = nullptr;
     BaseSize = FIntPoint(1, 1);
     bIsRotated = false;
     bIsExamined = true;
@@ -18,13 +20,28 @@ UItemInstance::UItemInstance()
     MaxStack = 1;
     CurrentAmmo = 0;
     MaxAmmo = 0;
+    Damage = 0;
+    Armor = 0;
     EquippedSight = nullptr;
     EquippedMuzzle = nullptr;
     EquippedMagazine = nullptr;
 }
 
-UTexture2D* UItemInstance::GetDynamicIcon() const
+UTexture2D* UItemInstance::GetDynamicIcon()
 {
+    if (!ItemIcon.IsNull())
+    {
+        if (UTexture2D* DataTableIcon = ItemIcon.LoadSynchronous())
+        {
+            return DataTableIcon;
+        }
+    }
+
+    if (CachedDynamicIcon)
+    {
+        return CachedDynamicIcon;
+    }
+
     FString IconFileName = TemplateID.ToString() + TEXT(".png");
     FString FilePath = FPaths::ProjectDir() + TEXT("RawAssets/Icons/") + IconFileName;
 
@@ -40,7 +57,8 @@ UTexture2D* UItemInstance::GetDynamicIcon() const
                 LoadedTexture->CompressionSettings = TC_EditorIcon;
                 LoadedTexture->SRGB = true;
                 LoadedTexture->UpdateResource();
-                return LoadedTexture;
+                CachedDynamicIcon = LoadedTexture;
+                return CachedDynamicIcon;
             }
         }
     }
@@ -52,12 +70,21 @@ void UItemInstance::InitFromData(const FItemData& InData)
     TemplateID = InData.ItemID;
     ItemName = InData.ItemName;
     Category = InData.Category;
+    ItemIcon = InData.ItemIcon;
+    CachedDynamicIcon = nullptr;
     Rarity = InData.Rarity;
-    BaseSize = InData.Size;
-    MaxStack = InData.MaxStack;
+    BaseSize = FIntPoint(FMath::Max(1, InData.Size.X), FMath::Max(1, InData.Size.Y));
+    bIsRotated = false;
+    bIsExamined = true;
+    MaxStack = FMath::Max(1, InData.MaxStack);
     AttachmentType = InData.AttachmentType;
     CompatibleAmmo = InData.CompatibleAmmo;
-    MaxAmmo = InData.MaxAmmo;
+    MaxAmmo = FMath::Max(0, InData.MaxAmmo);
+    Damage = InData.Damage;
+    Armor = InData.Armor;
+    EquippedSight = nullptr;
+    EquippedMuzzle = nullptr;
+    EquippedMagazine = nullptr;
     
     // 기본적으로 풀 스택/풀 장탄수 (테스트용)
     CurrentStack = 1;
@@ -66,6 +93,7 @@ void UItemInstance::InitFromData(const FItemData& InData)
         CurrentStack = FMath::RandRange(FMath::Max(1, MaxStack / 2), MaxStack);
     }
     
+    CurrentAmmo = 0;
     if (MaxAmmo > 0)
     {
         CurrentAmmo = MaxAmmo;

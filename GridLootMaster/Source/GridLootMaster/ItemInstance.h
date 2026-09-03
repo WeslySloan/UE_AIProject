@@ -32,6 +32,12 @@ public:
     EItemCategory Category;
 
     UPROPERTY(BlueprintReadWrite, Category = "Item Data")
+    TSoftObjectPtr<UTexture2D> ItemIcon;
+
+    UPROPERTY(Transient)
+    UTexture2D* CachedDynamicIcon;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Item Data")
     FIntPoint BaseSize;
 
     UPROPERTY(BlueprintReadWrite, Category = "Item Data")
@@ -71,12 +77,18 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "Item Instance")
     int32 MaxAmmo;
 
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    int32 Damage;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat")
+    int32 Armor;
+
     // 아이템 생성 시 데이터 테이블 행을 바탕으로 초기화하는 함수
     UFUNCTION(BlueprintCallable, Category = "Item Instance")
     void InitFromData(const struct FItemData& InData);
 
     UFUNCTION(BlueprintCallable, Category = "Icon")
-    class UTexture2D* GetDynamicIcon() const;
+    class UTexture2D* GetDynamicIcon();
 
     int32 GetWidth(bool bIgnoreRotation = false) const
     {
@@ -104,5 +116,13 @@ public:
     bool IsStackable() const
     {
         return MaxStack > 1;
+    }
+
+    bool IsCompatibleAmmo(const UItemInstance* Ammo) const
+    {
+        if (!Ammo || Ammo->Category != EItemCategory::Consumable || CompatibleAmmo.IsEmpty()) return false;
+
+        return Ammo->ItemName.Contains(CompatibleAmmo, ESearchCase::IgnoreCase) ||
+            Ammo->TemplateID.ToString().Contains(CompatibleAmmo, ESearchCase::IgnoreCase);
     }
 };

@@ -72,3 +72,8 @@ Plugins/**/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+
+# Local Codex/LLM instructions and notification helper
+Tools/discord-codex-notify.ps1
+LLM_ONBOARDING_GUIDE.md
+AGENTS.md

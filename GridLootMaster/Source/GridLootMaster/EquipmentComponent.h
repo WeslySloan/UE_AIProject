@@ -30,10 +30,12 @@ public:
     UItemInstance* GetEquippedItem(FName SlotID) const;
 
     UFUNCTION(BlueprintCallable, Category = "Equipment")
-    void RemoveItemByInstanceID(FName InstanceID);
+    bool RemoveItemByInstanceID(FName InstanceID);
+
+    bool RemoveAttachedItem(UItemInstance* Attachment);
 
     UFUNCTION(BlueprintCallable, Category = "Equipment")
-    void RemoveItemBySlotID(FName SlotID);
+    bool RemoveItemBySlotID(FName SlotID);
 
     UFUNCTION(BlueprintCallable, Category = "Equipment")
     void ClearEquipment();

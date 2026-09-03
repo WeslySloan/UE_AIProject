@@ -20,10 +20,12 @@
 #include "../GridGameMode.h"
 #include "../GridInventoryComponent.h"
 #include "../EquipmentComponent.h"
+#include "../CombatComponent.h"
 #include "../Map/MapManagerComponent.h"
 #include "../ItemInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
+#include "TimerManager.h"
 
 bool UMainGameUI::Initialize()
 {
@@ -97,7 +99,7 @@ bool UMainGameUI::Initialize()
         // 1. Rig Row
         UHorizontalBox* RigRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
         AddToVertical(MiddlePanel, RigRow, 20.0f);
-        AddToHorizontal(RigRow, CreateEquipSlotEx(RigSlot, TEXT("Rig"), EItemCategory::Rig, TEXT("Chest Rig"), 128.0f, 128.0f)); // 2x2 슬롯
+        AddToHorizontal(RigRow, CreateEquipSlotEx(RigSlot, TEXT("Rig"), EItemCategory::Rig, TEXT("Chest Rig"), 128.0f, 64.0f)); // 2x1 장비 슬롯
         RigBoard = WidgetTree->ConstructWidget<UGridBoardWidget>(UGridBoardWidget::StaticClass(), TEXT("RigBoard"));
         AddToHorizontal(RigRow, RigBoard);
 
@@ -114,7 +116,7 @@ bool UMainGameUI::Initialize()
         // 3. Backpack Row
         UHorizontalBox* BackpackRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
         AddToVertical(MiddlePanel, BackpackRow, 20.0f);
-        AddToHorizontal(BackpackRow, CreateEquipSlotEx(BackpackSlot, TEXT("Backpack"), EItemCategory::Backpack, TEXT("Backpack"), 192.0f, 192.0f));
+        AddToHorizontal(BackpackRow, CreateEquipSlotEx(BackpackSlot, TEXT("Backpack"), EItemCategory::Backpack, TEXT("Backpack"), 128.0f, 192.0f));
         GridBoard = WidgetTree->ConstructWidget<UGridBoardWidget>(UGridBoardWidget::StaticClass(), TEXT("GridBoard"));
         AddToHorizontal(BackpackRow, GridBoard);
 
@@ -145,6 +147,24 @@ bool UMainGameUI::Initialize()
         ToggleSlot->SetPosition(FVector2D(0.0f, 15.0f));
         ToggleSlot->SetSize(FVector2D(200.0f, 40.0f)); // 버튼 넉넉하게 고정 크기 할당
 
+        // 상단 이벤트 알림 영역
+        EventNotificationBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("EventNotificationBorder"));
+        EventNotificationBorder->SetBrushColor(FLinearColor(0.02f, 0.03f, 0.04f, 0.85f));
+        EventNotificationText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("EventNotificationText"));
+        EventNotificationText->SetColorAndOpacity(FLinearColor::White);
+        FSlateFontInfo NotificationFont = EventNotificationText->GetFont();
+        NotificationFont.Size = 20;
+        EventNotificationText->SetFont(NotificationFont);
+        EventNotificationText->SetJustification(ETextJustify::Center);
+        EventNotificationBorder->AddChild(EventNotificationText);
+        UCanvasPanelSlot* NotificationSlot = RootCanvas->AddChildToCanvas(EventNotificationBorder);
+        NotificationSlot->SetAnchors(FAnchors(0.5f, 0.0f));
+        NotificationSlot->SetAlignment(FVector2D(0.5f, 0.0f));
+        NotificationSlot->SetPosition(FVector2D(0.0f, 65.0f));
+        NotificationSlot->SetSize(FVector2D(700.0f, 48.0f));
+        NotificationSlot->SetZOrder(15);
+        EventNotificationBorder->SetVisibility(ESlateVisibility::Hidden);
+
         // === 3. 오른쪽 패널 (상태바 + 루팅 컨테이너 + 버튼) ===
         RightPanelSwitcher = WidgetTree->ConstructWidget<UWidgetSwitcher>(UWidgetSwitcher::StaticClass(), TEXT("RightPanelSwitcher"));
         UHorizontalBoxSlot* RightPanelSlot = HBox->AddChildToHorizontalBox(RightPanelSwitcher);
@@ -157,6 +177,35 @@ bool UMainGameUI::Initialize()
         MinimapUI = WidgetTree->ConstructWidget<UMinimapWidget>(UMinimapWidget::StaticClass(), TEXT("MinimapUI"));
         RightPanelSwitcher->AddChild(MinimapUI); // Index 1: Minimap View
 
+        CompactMinimapUI = WidgetTree->ConstructWidget<UMinimapWidget>(UMinimapWidget::StaticClass(), TEXT("CompactMinimapUI"));
+        UCanvasPanelSlot* CompactMinimapSlot = RootCanvas->AddChildToCanvas(CompactMinimapUI);
+        CompactMinimapSlot->SetAnchors(FAnchors(0.5f, 1.0f));
+        CompactMinimapSlot->SetAlignment(FVector2D(0.5f, 1.0f));
+        CompactMinimapSlot->SetPosition(FVector2D(0.0f, -15.0f));
+        CompactMinimapSlot->SetSize(FVector2D(250.0f, 285.0f));
+        CompactMinimapSlot->SetZOrder(20);
+        CompactMinimapUI->SetVisibility(ESlateVisibility::Hidden);
+
+        UVerticalBox* StashPanel = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("StashPanel"));
+        RightPanelSwitcher->AddChild(StashPanel); // Index 2: Stash View
+
+        UTextBlock* StashTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        StashTitle->SetText(FText::FromString(TEXT("STASH")));
+        StashPanel->AddChildToVerticalBox(StashTitle);
+
+        StashBoard = WidgetTree->ConstructWidget<UGridBoardWidget>(UGridBoardWidget::StaticClass(), TEXT("StashBoard"));
+        UVerticalBoxSlot* StashBoardSlot = StashPanel->AddChildToVerticalBox(StashBoard);
+        StashBoardSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        StashBoardSlot->SetHorizontalAlignment(HAlign_Left);
+
+        StartRaidBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("StartRaidButton"));
+        UTextBlock* StartRaidText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        StartRaidText->SetText(FText::FromString(TEXT("START RAID")));
+        StartRaidText->SetColorAndOpacity(FLinearColor::Black);
+        StartRaidBtn->AddChild(StartRaidText);
+        StartRaidBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnStartRaidClicked);
+        StashPanel->AddChildToVerticalBox(StartRaidBtn);
+
         TimerText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TimerText"));
         TimerText->SetText(FText::FromString(TEXT("Time: 60s")));
         RightPanel->AddChildToVerticalBox(TimerText);
@@ -164,6 +213,14 @@ bool UMainGameUI::Initialize()
         ScoreText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ScoreText"));
         ScoreText->SetText(FText::FromString(TEXT("Score: 0 / 1000")));
         RightPanel->AddChildToVerticalBox(ScoreText);
+
+        HealthText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("HealthText"));
+        HealthText->SetText(FText::FromString(TEXT("HP: 100 / 100")));
+        RightPanel->AddChildToVerticalBox(HealthText);
+
+        CombatText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("CombatText"));
+        CombatText->SetText(FText::FromString(TEXT("Enemy: None")));
+        RightPanel->AddChildToVerticalBox(CombatText);
 
         UBorder* Spacer1 = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
         Spacer1->SetBrushColor(FLinearColor::Transparent);
@@ -189,8 +246,28 @@ bool UMainGameUI::Initialize()
         SearchSlot->SetPadding(FMargin(0, 10, 0, 0));
         SearchSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
 
+        StashBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("StashButton"));
+        UTextBlock* StashBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        StashBtnText->SetText(FText::FromString(TEXT("OPEN STASH")));
+        StashBtnText->SetColorAndOpacity(FLinearColor::Black);
+        StashBtn->AddChild(StashBtnText);
+        StashBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnStashButtonClicked);
+        UVerticalBoxSlot* StashBtnSlot = RightPanel->AddChildToVerticalBox(StashBtn);
+        StashBtnSlot->SetPadding(FMargin(0, 10, 0, 0));
+        StashBtnSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+
+        ExtractBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ExtractButton"));
+        UTextBlock* ExtractBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        ExtractBtnText->SetText(FText::FromString(TEXT("EXTRACT RAID")));
+        ExtractBtnText->SetColorAndOpacity(FLinearColor::Black);
+        ExtractBtn->AddChild(ExtractBtnText);
+        ExtractBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnExtractButtonClicked);
+        UVerticalBoxSlot* ExtractBtnSlot = RightPanel->AddChildToVerticalBox(ExtractBtn);
+        ExtractBtnSlot->SetPadding(FMargin(0, 10, 0, 0));
+        ExtractBtnSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+
         // Sell Button
-        UButton* SellBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellButton"));
+        SellBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellButton"));
         UTextBlock* SellBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         SellBtnText->SetText(FText::FromString(TEXT("SELL BAG")));
         SellBtnText->SetColorAndOpacity(FLinearColor::Black);
@@ -201,7 +278,7 @@ bool UMainGameUI::Initialize()
         SellSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
 
         // Sell All Button
-        UButton* SellAllBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellAllButton"));
+        SellAllBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellAllButton"));
         UTextBlock* SellAllBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         SellAllBtnText->SetText(FText::FromString(TEXT("SELL ALL")));
         SellAllBtnText->SetColorAndOpacity(FLinearColor::Black);
@@ -212,7 +289,7 @@ bool UMainGameUI::Initialize()
         SellAllSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
 
         // Bang (Shoot) Button
-        UButton* BangBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("BangButton"));
+        BangBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("BangButton"));
         UTextBlock* BangBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         BangBtnText->SetText(FText::FromString(TEXT("BANG!")));
         BangBtnText->SetColorAndOpacity(FLinearColor::Black);
@@ -260,10 +337,25 @@ bool UMainGameUI::Initialize()
                 PocketBoard->RefreshGridUI();
             }
 
-            if (GM->MapManagerComponent && MinimapUI)
+            if (GM->StashComponent)
             {
-                MinimapUI->InitMinimap(GM->MapManagerComponent);
+                StashBoard->InventoryComponent = GM->StashComponent;
+                GM->StashComponent->OnInventoryChanged.AddUniqueDynamic(StashBoard, &UGridBoardWidget::RefreshGridUI);
+                GM->StashComponent->OnInventoryChanged.AddUniqueDynamic(this, &UMainGameUI::OnStashInventoryChanged);
+                StashBoard->RefreshGridUI();
             }
+
+            if (GM->MapManagerComponent) RefreshMinimaps(GM->MapManagerComponent);
+
+            if (GM->CombatComponent)
+            {
+                GM->CombatComponent->OnCombatStateChanged.AddDynamic(this, &UMainGameUI::UpdateCombatUI);
+                UpdateCombatUI();
+            }
+
+            GM->OnGameStateChanged.AddDynamic(this, &UMainGameUI::UpdateActionAvailability);
+            GM->OnGameStateChanged.AddDynamic(this, &UMainGameUI::UpdateCombatUI);
+            UpdateActionAvailability();
 
             SearchBtn->OnClicked.AddDynamic(GM, &AGridGameMode::StartContainerSearch);
         }
@@ -271,13 +363,147 @@ bool UMainGameUI::Initialize()
     return true;
 }
 
+void UMainGameUI::RefreshMinimaps(UMapManagerComponent* InMapManager)
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (!InMapManager || !MinimapUI || !CompactMinimapUI) return;
+
+    MinimapUI->InitMinimap(InMapManager, false);
+    CompactMinimapUI->InitMinimap(InMapManager, true);
+    MinimapUI->OnMovementMessage.AddUniqueDynamic(this, &UMainGameUI::QueueEventNotification);
+    MinimapUI->SetMovementStateMirror(CompactMinimapUI);
+
+    if (GM)
+    {
+        MinimapUI->OnPlayerMoved.AddUniqueDynamic(GM, &AGridGameMode::HandlePlayerMoved);
+    }
+    MinimapUI->OnPlayerMoved.AddUniqueDynamic(this, &UMainGameUI::OnMinimapPlayerMoved);
+}
+
+void UMainGameUI::OnMinimapPlayerMoved(FIntPoint NewCoordinate)
+{
+    UpdateActionAvailability();
+
+    if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+    {
+        if (GM->IsAtExtractionPoint())
+        {
+            QueueEventNotification(TEXT("탈출 지점에 도착했습니다."));
+        }
+    }
+}
+
+void UMainGameUI::OnStashInventoryChanged()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (!GM || GM->RaidState == ERaidState::InRaid)
+    {
+        return;
+    }
+
+    if (!GM->SaveStash())
+    {
+        QueueEventNotification(TEXT("창고 저장에 실패했습니다."));
+    }
+}
+
+void UMainGameUI::UpdateActionAvailability()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    const bool bInRaid = GM && GM->RaidState == ERaidState::InRaid;
+    const bool bInCombat = bInRaid && GM->CombatComponent && GM->CombatComponent->bHasActiveEnemy;
+    const bool bAtExtractionPoint = bInRaid && GM->IsAtExtractionPoint();
+
+    if (SearchBtn) SearchBtn->SetIsEnabled(bInRaid && !bInCombat);
+    if (ExtractBtn) ExtractBtn->SetIsEnabled(bAtExtractionPoint && !bInCombat);
+    if (SellBtn) SellBtn->SetIsEnabled(bInRaid && !bInCombat);
+    if (SellAllBtn) SellAllBtn->SetIsEnabled(bInRaid && !bInCombat);
+    if (BangBtn) BangBtn->SetIsEnabled(bInCombat);
+    if (MinimapUI && MinimapUI->AdvanceButton)
+    {
+        MinimapUI->AdvanceButton->SetIsEnabled(bInRaid && !bInCombat && MinimapUI->CurrentPath.Num() > 0);
+    }
+    if (CompactMinimapUI && CompactMinimapUI->AdvanceButton)
+    {
+        CompactMinimapUI->AdvanceButton->SetIsEnabled(bInRaid && !bInCombat && CompactMinimapUI->CurrentPath.Num() > 0);
+    }
+    if (CompactMinimapUI) CompactMinimapUI->SetVisibility(bInRaid ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
+    if (StartRaidBtn) StartRaidBtn->SetIsEnabled(GM && GM->RaidState == ERaidState::Lobby);
+    if (StashBtn) StashBtn->SetIsEnabled(GM && GM->RaidState != ERaidState::InRaid);
+    if (GM && GM->RaidState == ERaidState::InRaid && RightPanelSwitcher &&
+        RightPanelSwitcher->GetActiveWidgetIndex() == 2)
+    {
+        RightPanelSwitcher->SetActiveWidgetIndex(0);
+    }
+    if (GM && GM->RaidState != ERaidState::InRaid && RightPanelSwitcher &&
+        RightPanelSwitcher->GetActiveWidgetIndex() == 1)
+    {
+        RightPanelSwitcher->SetActiveWidgetIndex(0);
+    }
+    if (ToggleModeButton)
+    {
+        const bool bIsStashVisible = RightPanelSwitcher && RightPanelSwitcher->GetActiveWidgetIndex() == 2;
+        ToggleModeButton->SetVisibility(bInRaid && !bIsStashVisible
+            ? ESlateVisibility::Visible
+            : ESlateVisibility::Hidden);
+    }
+}
+
 void UMainGameUI::OnToggleModeClicked()
 {
+    if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+    {
+        if (GM->RaidState != ERaidState::InRaid) return;
+    }
+    else
+    {
+        return;
+    }
+
     if (RightPanelSwitcher)
     {
         int32 CurrentIdx = RightPanelSwitcher->GetActiveWidgetIndex();
+        if (CurrentIdx == 2)
+        {
+            if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+            {
+                if (!GM->SaveStash()) return;
+            }
+            RightPanelSwitcher->SetActiveWidgetIndex(0);
+            UpdateActionAvailability();
+            return;
+        }
         RightPanelSwitcher->SetActiveWidgetIndex(CurrentIdx == 0 ? 1 : 0);
     }
+}
+
+void UMainGameUI::OnStashButtonClicked()
+{
+    if (!RightPanelSwitcher) return;
+
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (!GM || GM->RaidState == ERaidState::InRaid) return;
+    if (!GM->SaveStash()) return;
+
+    RightPanelSwitcher->SetActiveWidgetIndex(2);
+    UpdateActionAvailability();
+}
+
+void UMainGameUI::OnStartRaidClicked()
+{
+    if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+    {
+        if (GM->StartRaid() && RightPanelSwitcher)
+        {
+            RightPanelSwitcher->SetActiveWidgetIndex(0);
+        }
+    }
+}
+
+void UMainGameUI::OnExtractButtonClicked()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GM) GM->ExtractRaid();
 }
 
 FReply UMainGameUI::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
@@ -304,15 +530,129 @@ void UMainGameUI::UpdateScore(int32 NewScore)
 {
     if (ScoreText)
     {
-        ScoreText->SetText(FText::FromString(FString::Printf(TEXT("Score: %d / 1000"), NewScore)));
+        int32 ScoreQuota = 1000;
+        if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+        {
+            ScoreQuota = GM->QuotaScore;
+        }
+        ScoreText->SetText(FText::FromString(FString::Printf(TEXT("Score: %d / %d"), NewScore, ScoreQuota)));
     }
 }
 
 void UMainGameUI::UpdateTimer(float RemainingTime)
 {
-    if (TimerText)
+	if (TimerText)
+	{
+		TimerText->SetColorAndOpacity(FLinearColor::White);
+		TimerText->SetText(FText::FromString(FString::Printf(TEXT("Time: %d s"), FMath::FloorToInt(RemainingTime))));
+	}
+}
+
+void UMainGameUI::UpdateHealth(int32 NewHealth, int32 NewMaxHealth)
+{
+    if (HealthText)
     {
-        TimerText->SetText(FText::FromString(FString::Printf(TEXT("Time: %d s"), FMath::FloorToInt(RemainingTime))));
+        HealthText->SetText(FText::FromString(FString::Printf(TEXT("HP: %d / %d"), NewHealth, NewMaxHealth)));
+    }
+}
+
+void UMainGameUI::UpdateCombatUI()
+{
+    UpdateActionAvailability();
+    if (!CombatText) return;
+
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (!GM || !GM->CombatComponent || GM->RaidState != ERaidState::InRaid ||
+        GM->CombatComponent->CurrentEnemy.Definition.EnemyID.IsNone())
+    {
+        const FString Message = GM && GM->CombatComponent && GM->RaidState == ERaidState::InRaid
+            ? GM->CombatComponent->LastCombatMessage
+            : TEXT("");
+        CombatText->SetText(FText::FromString(Message.IsEmpty() ? TEXT("Enemy: None") : FString::Printf(TEXT("Enemy: None\n%s"), *Message)));
+        QueueEventNotification(Message);
+        return;
+    }
+
+    const FEnemyInstanceData& Enemy = GM->CombatComponent->CurrentEnemy;
+    const FString StateText = GM->CombatComponent->bHasActiveEnemy ?
+        FString::Printf(TEXT("HP: %d / %d"), Enemy.CurrentHealth, Enemy.Definition.MaxHealth) :
+        TEXT("DEFEATED");
+    const FString Message = GM->CombatComponent->LastCombatMessage;
+    const FString CombatStatus = FString::Printf(TEXT("Enemy: %s (%s)"), *Enemy.Definition.DisplayName, *StateText);
+    CombatText->SetText(FText::FromString(Message.IsEmpty() ? CombatStatus : FString::Printf(TEXT("%s\n%s"), *CombatStatus, *Message)));
+    QueueEventNotification(Message);
+}
+
+void UMainGameUI::ShowEventNotification(FString Message)
+{
+    if (!EventNotificationText) return;
+
+    PendingEventNotifications.Empty();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(EventNotificationTimerHandle);
+    }
+    EventNotificationText->SetText(FText::FromString(Message));
+    const ESlateVisibility NotificationVisibility = Message.IsEmpty()
+        ? ESlateVisibility::Hidden
+        : ESlateVisibility::Visible;
+    EventNotificationText->SetVisibility(NotificationVisibility);
+    if (EventNotificationBorder)
+    {
+        EventNotificationBorder->SetVisibility(NotificationVisibility);
+    }
+}
+
+void UMainGameUI::QueueEventNotification(FString Message)
+{
+    if (Message.IsEmpty() || !EventNotificationText) return;
+
+    PendingEventNotifications.Add(Message);
+    if (EventNotificationText->GetVisibility() == ESlateVisibility::Visible)
+    {
+        return;
+    }
+
+    EventNotificationText->SetText(FText::FromString(PendingEventNotifications[0]));
+    EventNotificationText->SetVisibility(ESlateVisibility::Visible);
+    if (EventNotificationBorder)
+    {
+        EventNotificationBorder->SetVisibility(ESlateVisibility::Visible);
+    }
+    PendingEventNotifications.RemoveAt(0);
+
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            EventNotificationTimerHandle, this, &UMainGameUI::OnEventNotificationTimerExpired, 2.5f, false);
+    }
+}
+
+void UMainGameUI::OnEventNotificationTimerExpired()
+{
+    if (!EventNotificationText) return;
+
+    if (PendingEventNotifications.Num() == 0)
+    {
+        EventNotificationText->SetVisibility(ESlateVisibility::Hidden);
+        if (EventNotificationBorder)
+        {
+            EventNotificationBorder->SetVisibility(ESlateVisibility::Hidden);
+        }
+        return;
+    }
+
+    EventNotificationText->SetText(FText::FromString(PendingEventNotifications[0]));
+    PendingEventNotifications.RemoveAt(0);
+    if (EventNotificationBorder)
+    {
+        EventNotificationBorder->SetVisibility(ESlateVisibility::Visible);
+    }
+
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimer(
+            EventNotificationTimerHandle, this, &UMainGameUI::OnEventNotificationTimerExpired, 2.5f, false);
     }
 }
 
@@ -324,23 +664,38 @@ void UMainGameUI::ShowGameResult(bool bIsWin)
         TimerText->SetText(FText::FromString(ResultStr));
         TimerText->SetColorAndOpacity(bIsWin ? FLinearColor::Green : FLinearColor::Red);
     }
+    QueueEventNotification(bIsWin ? TEXT("RAID EXTRACTED") : TEXT("RAID FAILED"));
 }
 
 void UMainGameUI::OnSellButtonClicked()
 {
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
-    if (GM && GM->InventoryComponent)
+    if (GM && GM->RaidState == ERaidState::InRaid && GM->InventoryComponent && GM->ItemDataTable)
     {
         int32 TotalValue = 0;
-        for (FName id : GM->InventoryComponent->GridCells)
+        TArray<TPair<FName, int32>> SellableItems;
+        for (const TPair<FName, UItemInstance*>& Pair : GM->InventoryComponent->ItemInstances)
         {
-            if (id != NAME_None) TotalValue += 10;
+            if (UItemInstance* Item = Pair.Value)
+            {
+                if (const FItemData* ItemData = GM->ItemDataTable->FindRow<FItemData>(Item->TemplateID, TEXT("Sell")))
+                {
+                    SellableItems.Add(TPair<FName, int32>(Pair.Key, ItemData->Value * Item->CurrentStack));
+                }
+            }
+        }
+
+        for (const TPair<FName, int32>& SellableItem : SellableItems)
+        {
+            if (GM->InventoryComponent->RemoveItem(SellableItem.Key))
+            {
+                TotalValue += SellableItem.Value;
+            }
         }
 
         if (TotalValue > 0)
         {
             GM->AddScore(TotalValue);
-            GM->InventoryComponent->ClearInventory();
         }
     }
 }
@@ -348,19 +703,35 @@ void UMainGameUI::OnSellButtonClicked()
 void UMainGameUI::OnSellAllButtonClicked()
 {
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
-    if (!GM) return;
+    if (!GM || GM->RaidState != ERaidState::InRaid || !GM->ItemDataTable) return;
 
     int32 TotalValue = 0;
     auto SellGrid = [&](UGridInventoryComponent* Inv) {
         if (!Inv) return;
-        for (FName id : Inv->GridCells)
+
+        TArray<TPair<FName, int32>> SellableItems;
+        for (const TPair<FName, UItemInstance*>& Pair : Inv->ItemInstances)
         {
-            if (id != NAME_None) TotalValue += 10;
+            if (UItemInstance* Item = Pair.Value)
+            {
+                if (const FItemData* ItemData = GM->ItemDataTable->FindRow<FItemData>(Item->TemplateID, TEXT("Sell")))
+                {
+                    SellableItems.Add(TPair<FName, int32>(Pair.Key, ItemData->Value * Item->CurrentStack));
+                }
+            }
         }
-        Inv->ClearInventory();
+
+        for (const TPair<FName, int32>& SellableItem : SellableItems)
+        {
+            if (Inv->RemoveItem(SellableItem.Key))
+            {
+                TotalValue += SellableItem.Value;
+            }
+        }
     };
 
     SellGrid(GM->InventoryComponent);
+    SellGrid(GM->LootContainerComponent);
     SellGrid(GM->SafeBoxComponent);
     SellGrid(GM->RigComponent);
     SellGrid(GM->PocketComponent);
@@ -374,35 +745,80 @@ void UMainGameUI::OnSellAllButtonClicked()
 void UMainGameUI::OnBangButtonClicked()
 {
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
-    if (!GM || !GM->EquipmentComponent) return;
+    if (!GM || GM->RaidState != ERaidState::InRaid) return;
+
+    if (!GM->CombatComponent || !GM->CombatComponent->bHasActiveEnemy)
+    {
+        QueueEventNotification(TEXT("공격할 적이 없습니다."));
+        return;
+    }
+
+    if (!GM->EquipmentComponent)
+    {
+        QueueEventNotification(TEXT("무기를 준비할 수 없습니다."));
+        return;
+    }
 
     UItemInstance* ActiveWeapon = GM->EquipmentComponent->GetEquippedItem(ActiveWeaponSlot);
-    if (ActiveWeapon && ActiveWeapon->EquippedMagazine && ActiveWeapon->EquippedMagazine->CurrentAmmo > 0)
+    if (!ActiveWeapon)
     {
-        ActiveWeapon->EquippedMagazine->CurrentAmmo--;
+        QueueEventNotification(TEXT("선택한 무기가 없습니다."));
+        return;
+    }
 
-        // 소음기 장착 여부 확인 (Muzzle 부착물이 있으면 소음기로 간주)
-        bool bIsSilenced = (ActiveWeapon->EquippedMuzzle != nullptr);
+    if (!ActiveWeapon->EquippedMagazine)
+    {
+        QueueEventNotification(TEXT("탄창이 장착되지 않았습니다."));
+        return;
+    }
 
-        // 사용자가 에디터로 임포트한 에셋 경로 (임포트 전이면 로드 실패함)
-        FString SoundPath = bIsSilenced 
+    if (ActiveWeapon->EquippedMagazine->CurrentAmmo <= 0)
+    {
+        QueueEventNotification(TEXT("탄약이 없습니다."));
+        return;
+    }
+
+    if (ActiveWeapon->Damage <= 0)
+    {
+        QueueEventNotification(TEXT("이 무기로 공격할 수 없습니다."));
+        return;
+    }
+
+    ActiveWeapon->EquippedMagazine->CurrentAmmo--;
+    ActiveWeapon->EquippedMagazine->OnItemModified.Broadcast();
+    ActiveWeapon->OnItemModified.Broadcast();
+
+    if (!GM->CombatComponent->AttackEnemy(ActiveWeapon->Damage))
+    {
+        ++ActiveWeapon->EquippedMagazine->CurrentAmmo;
+        ActiveWeapon->EquippedMagazine->OnItemModified.Broadcast();
+        ActiveWeapon->OnItemModified.Broadcast();
+        return;
+    }
+
+    GM->CombatComponent->EnemyAttackPlayer();
+
+    // 소음기 장착 여부 확인 (Muzzle 부착물이 있으면 소음기로 간주)
+    bool bIsSilenced = (ActiveWeapon->EquippedMuzzle != nullptr);
+
+    // 사용자가 에디터로 임포트한 에셋 경로 (임포트 전이면 로드 실패함)
+    FString SoundPath = bIsSilenced
             ? TEXT("/Script/Engine.SoundWave'/Game/Assets/Sounds/Sound_WpnShoot_Silenced.Sound_WpnShoot_Silenced'")
             : TEXT("/Script/Engine.SoundWave'/Game/Assets/Sounds/Sound_WpnShoot_Normal.Sound_WpnShoot_Normal'");
 
-        USoundBase* ShootSound = Cast<USoundBase>(StaticLoadObject(USoundBase::StaticClass(), nullptr, *SoundPath));
-        if (!ShootSound)
-        {
-            // 에셋 임포트가 안 되어 있을 때의 대체 사운드
-            ShootSound = Cast<USoundBase>(StaticLoadObject(USoundBase::StaticClass(), nullptr, TEXT("/Engine/VREditor/Sounds/UI/Laser_Hover_01.Laser_Hover_01")));
-        }
-
-        if (ShootSound)
-        {
-            UGameplayStatics::PlaySound2D(this, ShootSound);
-        }
-
-        // UI 갱신
-        if (ActiveWeaponSlot == TEXT("Primary1") && WeaponSlot1) WeaponSlot1->RefreshSlotUI();
-        else if (ActiveWeaponSlot == TEXT("Primary2") && WeaponSlot2) WeaponSlot2->RefreshSlotUI();
+    USoundBase* ShootSound = Cast<USoundBase>(StaticLoadObject(USoundBase::StaticClass(), nullptr, *SoundPath));
+    if (!ShootSound)
+    {
+        // 에셋 임포트가 안 되어 있을 때의 대체 사운드
+        ShootSound = Cast<USoundBase>(StaticLoadObject(USoundBase::StaticClass(), nullptr, TEXT("/Engine/VREditor/Sounds/UI/Laser_Hover_01.Laser_Hover_01")));
     }
+
+    if (ShootSound)
+    {
+        UGameplayStatics::PlaySound2D(this, ShootSound);
+    }
+
+    // UI 갱신
+    if (ActiveWeaponSlot == TEXT("Primary1") && WeaponSlot1) WeaponSlot1->RefreshSlotUI();
+    else if (ActiveWeaponSlot == TEXT("Primary2") && WeaponSlot2) WeaponSlot2->RefreshSlotUI();
 }

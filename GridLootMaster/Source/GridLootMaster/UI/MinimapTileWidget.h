@@ -27,6 +27,9 @@ public:
     class UImage* PlayerIcon;
 
     UPROPERTY()
+    class UButton* ClickButton;
+
+    UPROPERTY()
     class UBorder* HighlightBorder; // 경로 하이라이트
 
     UPROPERTY()
@@ -35,13 +38,19 @@ public:
     FIntPoint TileCoord;
     class UMinimapWidget* ParentMinimap;
 
-    void InitTile(const FTileData& InData, class UMinimapWidget* InParent);
+    void InitTile(const FTileData& InData, class UMinimapWidget* InParent, float InTileSize = 64.0f);
+    void RefreshTileData(const FTileData& InData);
     void SetIsPath(bool bIsPath);
     void SetHasPlayer(bool bHasPlayer);
+    void TriggerClick();
 
 protected:
     virtual void NativeConstruct() override;
     virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual void NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual void NativeOnMouseLeave(const FPointerEvent& InMouseEvent) override;
+
+    UFUNCTION()
+    void OnTileButtonClicked();
+
 };

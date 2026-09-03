@@ -25,7 +25,8 @@ enum class ETileType : uint8
     Normal UMETA(DisplayName = "일반 방"),
     DeadEnd UMETA(DisplayName = "밀실"),
     Stairs UMETA(DisplayName = "지하 계단"),
-    Secret UMETA(DisplayName = "비밀 방")
+    Secret UMETA(DisplayName = "비밀 방"),
+    Extraction UMETA(DisplayName = "탈출 지점")
 };
 
 // 개별 타일의 데이터를 정의하는 구조체

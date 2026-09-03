@@ -52,6 +52,14 @@ protected:
 
     virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
+#if WITH_DEV_AUTOMATION_TESTS
+public:
+    FReply NativeOnKeyDownForTest(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
+    {
+        return NativeOnKeyDown(InGeometry, InKeyEvent);
+    }
+#endif
+
     UFUNCTION()
     void OnAutoSplitConfirmed(int32 SplitAmount);
 
@@ -63,6 +71,9 @@ protected:
 
     UFUNCTION()
     void HandleUnloadItem(class UItemInstance* TargetItem);
+
+    UFUNCTION()
+    void HandleItemModified();
 
     // 회전 상태가 변경되었을 때 블루프린트에서 비주얼을 업데이트
     UFUNCTION(BlueprintImplementableEvent, Category = "Item UI")

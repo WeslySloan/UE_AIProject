@@ -42,6 +42,9 @@ public:
     UFUNCTION()
     void OnEquipmentChanged();
 
+    UFUNCTION()
+    void HandleEquippedItemModified();
+
     UFUNCTION(BlueprintCallable, Category = "Equipment")
     void SetHighlight(bool bActive);
 

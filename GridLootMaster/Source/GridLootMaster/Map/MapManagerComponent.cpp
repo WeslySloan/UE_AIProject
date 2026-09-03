@@ -7,6 +7,9 @@ UMapManagerComponent::UMapManagerComponent()
     PrimaryComponentTick.bCanEverTick = false;
     MapWidth = 9;
     MapHeight = 9;
+    SpawnPoint = FIntPoint(0, 0);
+    ExtractionPointCount = 1;
+    ExtractionMinDistance = 5;
 }
 
 void UMapManagerComponent::BeginPlay()
@@ -32,8 +35,14 @@ ETileZone UMapManagerComponent::DetermineZone(int32 X, int32 Y) const
 
 void UMapManagerComponent::InitializeMap()
 {
-    MapGrid.Empty();
-    MapGrid.SetNum(MapWidth * MapHeight);
+	MapWidth = FMath::Clamp(MapWidth, 1, 9);
+	MapHeight = FMath::Clamp(MapHeight, 1, 9);
+	SpawnPoint.X = FMath::Clamp(SpawnPoint.X, 0, MapWidth - 1);
+	SpawnPoint.Y = FMath::Clamp(SpawnPoint.Y, 0, MapHeight - 1);
+	ExtractionPoints.Empty();
+
+	MapGrid.Empty();
+	MapGrid.SetNum(MapWidth * MapHeight);
 
     for (int32 Y = 0; Y < MapHeight; ++Y)
     {
@@ -70,12 +79,14 @@ void UMapManagerComponent::InitializeMap()
     CloseEdge(2, 0, 3, 0); CloseEdge(2, 1, 3, 1); CloseEdge(2, 2, 3, 2); // Zone A와 B 사이 막음
     CloseEdge(1, 2, 1, 3); CloseEdge(2, 2, 2, 3); // Zone A와 D 사이 막음 (통로 하나만 놔둠)
     CloseEdge(5, 5, 6, 5); CloseEdge(5, 6, 6, 6);
+
+    GenerateExtractionPoints();
 }
 
 bool UMapManagerComponent::GetTileData(int32 X, int32 Y, FTileData& OutTileData) const
 {
     int32 Index = GetIndex(X, Y);
-    if (Index != -1)
+    if (Index != -1 && MapGrid.IsValidIndex(Index))
     {
         OutTileData = MapGrid[Index];
         return true;
@@ -83,12 +94,88 @@ bool UMapManagerComponent::GetTileData(int32 X, int32 Y, FTileData& OutTileData)
     return false;
 }
 
+bool UMapManagerComponent::IsExtractionPoint(FIntPoint Coordinate) const
+{
+    return ExtractionPoints.Contains(Coordinate);
+}
+
+void UMapManagerComponent::GenerateExtractionPoints()
+{
+    TArray<FIntPoint> Candidates;
+    const int32 CenterX = MapWidth / 2;
+    const int32 CenterY = MapHeight / 2;
+    const bool bSpawnOnWest = SpawnPoint.X < CenterX;
+    const bool bSpawnOnEast = SpawnPoint.X > CenterX;
+    const bool bSpawnOnNorth = SpawnPoint.Y < CenterY;
+    const int32 MinDistance = FMath::Max(0, ExtractionMinDistance);
+
+    if (bSpawnOnWest || (!bSpawnOnEast && bSpawnOnNorth))
+    {
+        const int32 ExtractionX = MapWidth - 1;
+        for (int32 Y = 0; Y < MapHeight; ++Y)
+        {
+            Candidates.Add(FIntPoint(ExtractionX, Y));
+        }
+    }
+    else if (bSpawnOnEast)
+    {
+        const int32 ExtractionX = 0;
+        for (int32 Y = 0; Y < MapHeight; ++Y)
+        {
+            Candidates.Add(FIntPoint(ExtractionX, Y));
+        }
+    }
+    else
+    {
+        const int32 ExtractionY = SpawnPoint.Y < CenterY ? MapHeight - 1 : 0;
+        for (int32 X = 0; X < MapWidth; ++X)
+        {
+            Candidates.Add(FIntPoint(X, ExtractionY));
+        }
+    }
+
+    for (int32 Index = Candidates.Num() - 1; Index > 0; --Index)
+    {
+        const int32 SwapIndex = FMath::RandRange(0, Index);
+        Candidates.Swap(Index, SwapIndex);
+    }
+
+    const int32 DesiredCount = FMath::Clamp(ExtractionPointCount, 1, Candidates.Num());
+    for (const FIntPoint Candidate : Candidates)
+    {
+        const int32 Distance = FMath::Abs(Candidate.X - SpawnPoint.X) + FMath::Abs(Candidate.Y - SpawnPoint.Y);
+        if (Distance < MinDistance || !FindPath(SpawnPoint, Candidate).Num())
+        {
+            continue;
+        }
+
+        ExtractionPoints.Add(Candidate);
+        if (ExtractionPoints.Num() >= DesiredCount)
+        {
+            break;
+        }
+    }
+
+    for (const FIntPoint ExtractionPoint : ExtractionPoints)
+    {
+        const int32 Index = GetIndex(ExtractionPoint.X, ExtractionPoint.Y);
+        if (MapGrid.IsValidIndex(Index))
+        {
+            MapGrid[Index].TileType = ETileType::Extraction;
+        }
+    }
+}
+
 bool UMapManagerComponent::CanMoveBetween(FIntPoint From, FIntPoint To) const
 {
     int32 FromIdx = GetIndex(From.X, From.Y);
     int32 ToIdx = GetIndex(To.X, To.Y);
     
-    if (FromIdx == -1 || ToIdx == -1) return false;
+    if (FromIdx == -1 || ToIdx == -1 ||
+        !MapGrid.IsValidIndex(FromIdx) || !MapGrid.IsValidIndex(ToIdx))
+    {
+        return false;
+    }
 
     const FTileData& FromTile = MapGrid[FromIdx];
     const FTileData& ToTile = MapGrid[ToIdx];

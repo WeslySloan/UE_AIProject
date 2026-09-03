@@ -69,7 +69,23 @@ void UEquipmentSlotWidget::InitSlot(FName InSlotID, EItemCategory InCategory, co
 
 void UEquipmentSlotWidget::SetEquippedItem(UItemInstance* NewItem)
 {
+    if (EquippedItem)
+    {
+        EquippedItem->OnItemModified.RemoveDynamic(this, &UEquipmentSlotWidget::HandleEquippedItemModified);
+    }
+
     EquippedItem = NewItem;
+
+    if (EquippedItem)
+    {
+        EquippedItem->OnItemModified.AddUniqueDynamic(this, &UEquipmentSlotWidget::HandleEquippedItemModified);
+    }
+
+    RefreshSlotUI();
+}
+
+void UEquipmentSlotWidget::HandleEquippedItemModified()
+{
     RefreshSlotUI();
 }
 
@@ -108,6 +124,10 @@ void UEquipmentSlotWidget::OnEquipmentChanged()
     if (GM && GM->EquipmentComponent)
     {
         SetEquippedItem(GM->EquipmentComponent->GetEquippedItem(SlotID));
+    }
+    else
+    {
+        SetEquippedItem(nullptr);
     }
 }
 
@@ -184,28 +204,39 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
     if (ItemDropOp->ItemObj->Category == EItemCategory::Attachment && EquippedItem && EquippedItem->Category == EItemCategory::Weapon)
     {
         EAttachmentType ModType = ItemDropOp->ItemObj->AttachmentType;
-        bool bAttached = false;
-        if (ModType == EAttachmentType::Sight && !EquippedItem->EquippedSight)
-        {
-            EquippedItem->EquippedSight = ItemDropOp->ItemObj;
-            bAttached = true;
-        }
-        else if (ModType == EAttachmentType::Muzzle && !EquippedItem->EquippedMuzzle)
-        {
-            EquippedItem->EquippedMuzzle = ItemDropOp->ItemObj;
-            bAttached = true;
-        }
-        else if (ModType == EAttachmentType::Magazine && !EquippedItem->EquippedMagazine)
-        {
-            EquippedItem->EquippedMagazine = ItemDropOp->ItemObj;
-            bAttached = true;
-        }
+        const bool bSlotAvailable =
+            (ModType == EAttachmentType::Sight && !EquippedItem->EquippedSight) ||
+            (ModType == EAttachmentType::Muzzle && !EquippedItem->EquippedMuzzle) ||
+            (ModType == EAttachmentType::Magazine && !EquippedItem->EquippedMagazine);
 
-        if (bAttached)
+        if (bSlotAvailable)
         {
-            if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemObj->InstanceID);
+            bool bSourceRemoved = false;
+            if (ItemDropOp->SourceInventory)
+            {
+                if (ItemDropOp->SourceInventory->GetItemInstance(ItemDropOp->ItemID) == ItemDropOp->ItemObj)
+                {
+                    bSourceRemoved = ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemObj->InstanceID);
+                }
+            }
+            else if (ItemDropOp->SourceModSlot)
+            {
+                bSourceRemoved = true;
+            }
+            else
+            {
+                bSourceRemoved = GM->EquipmentComponent && GM->EquipmentComponent->RemoveAttachedItem(ItemDropOp->ItemObj);
+            }
+
+            if (!bSourceRemoved) return false;
+
+            if (ModType == EAttachmentType::Sight) EquippedItem->EquippedSight = ItemDropOp->ItemObj;
+            else if (ModType == EAttachmentType::Muzzle) EquippedItem->EquippedMuzzle = ItemDropOp->ItemObj;
+            else if (ModType == EAttachmentType::Magazine) EquippedItem->EquippedMagazine = ItemDropOp->ItemObj;
+
             if (ItemDropOp->OriginalWidget) ItemDropOp->OriginalWidget->RemoveFromParent();
             
+            EquippedItem->OnItemModified.Broadcast();
             RefreshSlotUI();
             if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->OnInventoryChanged.Broadcast();
             return true;
@@ -213,10 +244,16 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
     }
 
     // 삽탄 (탄약 -> 장착된 무기)
-    if (ItemDropOp->ItemObj->TemplateID.ToString().Contains("Ammo") && EquippedItem && EquippedItem->Category == EItemCategory::Weapon && EquippedItem->EquippedMagazine)
+    if (ItemDropOp->ItemObj->Category == EItemCategory::Consumable && EquippedItem && EquippedItem->Category == EItemCategory::Weapon && EquippedItem->EquippedMagazine)
     {
+        if (!ItemDropOp->SourceInventory ||
+            ItemDropOp->SourceInventory->GetItemInstance(ItemDropOp->ItemID) != ItemDropOp->ItemObj)
+        {
+            return false;
+        }
+
         UItemInstance* TargetMag = EquippedItem->EquippedMagazine;
-        if (TargetMag->CurrentAmmo < TargetMag->MaxAmmo)
+        if (TargetMag->IsCompatibleAmmo(ItemDropOp->ItemObj) && TargetMag->CurrentAmmo < TargetMag->MaxAmmo)
         {
             int32 AvailableSpace = TargetMag->MaxAmmo - TargetMag->CurrentAmmo;
             int32 AmountToLoad = FMath::Min(ItemDropOp->ItemObj->CurrentStack, AvailableSpace);
@@ -227,10 +264,18 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
             bool bAmmoDepleted = (ItemDropOp->ItemObj->CurrentStack <= 0);
             if (bAmmoDepleted)
             {
-                if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemObj->InstanceID);
+                if (!ItemDropOp->SourceInventory ||
+                    ItemDropOp->SourceInventory->GetItemInstance(ItemDropOp->ItemID) != ItemDropOp->ItemObj ||
+                    !ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemObj->InstanceID))
+                {
+                    TargetMag->CurrentAmmo -= AmountToLoad;
+                    ItemDropOp->ItemObj->CurrentStack += AmountToLoad;
+                    return false;
+                }
                 if (ItemDropOp->OriginalWidget) ItemDropOp->OriginalWidget->RemoveFromParent();
             }
             
+            EquippedItem->OnItemModified.Broadcast();
             RefreshSlotUI();
             if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->OnInventoryChanged.Broadcast();
             return true;
@@ -240,34 +285,149 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
     // 카테고리 체크
     if (ItemDropOp->ItemObj->Category != AllowedCategory) return false;
 
-    // 이미 장착된 아이템이 있다면 인벤토리(가방)로 되돌림
-    if (EquippedItem)
+    if (!GM->InventoryComponent || !GM->EquipmentComponent) return false;
+
+    if (ItemDropOp->SourceInventory &&
+        ItemDropOp->SourceInventory->GetItemInstance(ItemDropOp->ItemID) != ItemDropOp->ItemObj)
     {
-        // 빈 공간 찾아서 넣기
-        FIntPoint Size = EquippedItem->GetCurrentSize();
-        int32 FreeX, FreeY;
-        if (GM->InventoryComponent->FindEmptySpace(Size.X, Size.Y, FreeX, FreeY))
+        return false;
+    }
+
+    if (ItemDropOp->SourceEquipmentSlot != NAME_None &&
+        GM->EquipmentComponent->GetEquippedItem(ItemDropOp->SourceEquipmentSlot) != ItemDropOp->ItemObj)
+    {
+        return false;
+    }
+
+    UItemInstance* PreviousItem = GM->EquipmentComponent->GetEquippedItem(SlotID);
+    if (PreviousItem == ItemDropOp->ItemObj) return false;
+
+    int32 FreeX = 0;
+    int32 FreeY = 0;
+
+    auto RestoreIncomingItem = [&]() -> bool
+    {
+        if (ItemDropOp->SourceEquipmentSlot != NAME_None)
         {
-            if (GM->EquipmentComponent) GM->EquipmentComponent->RemoveItemByInstanceID(EquippedItem->InstanceID);
-            GM->InventoryComponent->AddItem(EquippedItem, FreeX, FreeY);
+            return GM->EquipmentComponent->EquipItem(ItemDropOp->SourceEquipmentSlot, ItemDropOp->ItemObj);
+        }
+
+        FIntPoint IncomingSize = ItemDropOp->ItemObj->GetCurrentSize();
+        int32 RestoreX = 0;
+        int32 RestoreY = 0;
+        UGridInventoryComponent* RestoreInventory = ItemDropOp->SourceInventory
+            ? ItemDropOp->SourceInventory
+            : GM->InventoryComponent;
+        return RestoreInventory &&
+            RestoreInventory->FindEmptySpace(IncomingSize.X, IncomingSize.Y, RestoreX, RestoreY) &&
+            RestoreInventory->AddItem(ItemDropOp->ItemObj, RestoreX, RestoreY);
+    };
+
+    bool bIncomingRemoved = false;
+
+    // 이미 장착된 아이템이 있다면 인벤토리(가방)로 되돌림
+    if (PreviousItem)
+    {
+        FIntPoint Size = PreviousItem->GetCurrentSize();
+        bool bCanStorePreviousItem = false;
+        if (ItemDropOp->SourceInventory == GM->InventoryComponent)
+        {
+            bCanStorePreviousItem = GM->InventoryComponent->FindEmptySpaceExcluding(
+                Size.X, Size.Y, ItemDropOp->ItemObj->InstanceID, FreeX, FreeY);
         }
         else
         {
+            bCanStorePreviousItem = GM->InventoryComponent->FindEmptySpace(Size.X, Size.Y, FreeX, FreeY);
+        }
+
+        if (!bCanStorePreviousItem)
+        {
             // 인벤토리 꽉 참 - 드롭 취소
+            return false;
+        }
+
+        // 새 아이템이 플레이어 인벤토리에 있으면 먼저 제거하여 위에서 확인한 칸을 확보합니다.
+        if (ItemDropOp->SourceInventory == GM->InventoryComponent)
+        {
+            bIncomingRemoved = GM->InventoryComponent->RemoveItem(ItemDropOp->ItemObj->InstanceID);
+            if (!bIncomingRemoved)
+            {
+                return false;
+            }
+        }
+
+        if (!GM->EquipmentComponent->RemoveItemBySlotID(SlotID))
+        {
+            if (bIncomingRemoved)
+            {
+                if (!RestoreIncomingItem())
+                {
+                    UE_LOG(LogTemp, Error, TEXT("Failed to restore incoming item after equipment slot removal failure."));
+                }
+            }
+            return false;
+        }
+
+        if (!GM->InventoryComponent->AddItem(PreviousItem, FreeX, FreeY))
+        {
+            // 예기치 않은 실패가 발생하면 기존 장비를 즉시 장착 상태로 복구합니다.
+            const bool bPreviousRestored = GM->EquipmentComponent->EquipItem(SlotID, PreviousItem);
+            bool bIncomingRestored = true;
+            if (bIncomingRemoved)
+            {
+                bIncomingRestored = RestoreIncomingItem();
+            }
+            if (!bPreviousRestored || !bIncomingRestored)
+            {
+                UE_LOG(LogTemp, Error, TEXT("Failed to restore equipment swap state after previous item storage failure."));
+            }
             return false;
         }
     }
 
     // 새 아이템 장착 (원본 인벤토리에서 제거)
-    if (GM->InventoryComponent) GM->InventoryComponent->RemoveItem(ItemDropOp->ItemObj->InstanceID);
-    if (GM->LootContainerComponent) GM->LootContainerComponent->RemoveItem(ItemDropOp->ItemObj->InstanceID);
-    if (GM->SafeBoxComponent) GM->SafeBoxComponent->RemoveItem(ItemDropOp->ItemObj->InstanceID);
-    if (GM->RigComponent) GM->RigComponent->RemoveItem(ItemDropOp->ItemObj->InstanceID);
-    if (GM->PocketComponent) GM->PocketComponent->RemoveItem(ItemDropOp->ItemObj->InstanceID);
-    if (GM->EquipmentComponent)
+    if (!bIncomingRemoved && ItemDropOp->SourceInventory)
     {
-        GM->EquipmentComponent->RemoveItemByInstanceID(ItemDropOp->ItemObj->InstanceID);
-        GM->EquipmentComponent->EquipItem(SlotID, ItemDropOp->ItemObj);
+        bIncomingRemoved = ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemObj->InstanceID);
+    }
+    else if (!bIncomingRemoved && ItemDropOp->SourceEquipmentSlot != NAME_None)
+    {
+        bIncomingRemoved = GM->EquipmentComponent->RemoveItemBySlotID(ItemDropOp->SourceEquipmentSlot);
+    }
+    else if (!bIncomingRemoved)
+    {
+        bIncomingRemoved = GM->EquipmentComponent->RemoveItemByInstanceID(ItemDropOp->ItemObj->InstanceID);
+    }
+
+    if (!bIncomingRemoved)
+    {
+        if (PreviousItem)
+        {
+            const bool bPreviousRemoved = GM->InventoryComponent->RemoveItem(PreviousItem->InstanceID);
+            const bool bPreviousRestored = bPreviousRemoved &&
+                GM->EquipmentComponent->EquipItem(SlotID, PreviousItem);
+            if (!bPreviousRestored)
+            {
+                UE_LOG(LogTemp, Error, TEXT("Failed to restore previous equipment after incoming item removal failure."));
+            }
+        }
+        return false;
+    }
+
+    if (!GM->EquipmentComponent->EquipItem(SlotID, ItemDropOp->ItemObj))
+    {
+        bool bPreviousRestored = true;
+        if (PreviousItem)
+        {
+            bPreviousRestored = GM->InventoryComponent->RemoveItem(PreviousItem->InstanceID) &&
+                GM->EquipmentComponent->EquipItem(SlotID, PreviousItem);
+        }
+        const bool bIncomingRestored = RestoreIncomingItem();
+        if (!bPreviousRestored || !bIncomingRestored)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Failed to restore equipment swap state after incoming equip failure."));
+        }
+        return false;
     }
 
     if (ItemDropOp->OriginalWidget)
@@ -297,7 +457,10 @@ void UEquipmentSlotWidget::NativeOnDragDetected(const FGeometry& InGeometry, con
     UItemDragDropOperation* DragDropOp = NewObject<UItemDragDropOperation>();
     DragDropOp->ItemID = EquippedItem->InstanceID;
     DragDropOp->ItemObj = EquippedItem;
-    DragDropOp->OriginalWidget = Cast<UDraggableItemWidget>(ItemCanvas->GetChildAt(0)); // 원본은 그대로 둠
+    DragDropOp->SourceEquipmentSlot = SlotID;
+    DragDropOp->OriginalWidget = ItemCanvas
+        ? Cast<UDraggableItemWidget>(ItemCanvas->GetChildAt(0))
+        : nullptr; // 원본은 그대로 둠
     
     // 드래그 비주얼 전용 위젯 생성 (본래 크기로)
     UDraggableItemWidget* DragVisual = WidgetTree->ConstructWidget<UDraggableItemWidget>(UDraggableItemWidget::StaticClass());
@@ -328,7 +491,7 @@ void UEquipmentSlotWidget::HandleRightClicked(UItemInstance* ItemObj)
         if (ContextMenu)
         {
             FVector2D ScreenPos = UWidgetLayoutLibrary::GetMousePositionOnPlatform();
-            ContextMenu->Setup(ItemObj, ScreenPos);
+            ContextMenu->Setup(ItemObj, ScreenPos, true);
             ContextMenu->OnInspectClicked.AddDynamic(this, &UEquipmentSlotWidget::HandleInspectItem);
             ContextMenu->OnUnequipClicked.AddDynamic(this, &UEquipmentSlotWidget::HandleUnequipClicked);
             ContextMenu->OnUnloadClicked.AddDynamic(this, &UEquipmentSlotWidget::HandleUnloadClicked);
@@ -339,7 +502,7 @@ void UEquipmentSlotWidget::HandleRightClicked(UItemInstance* ItemObj)
 
 void UEquipmentSlotWidget::HandleInspectItem(UItemInstance* TargetItem)
 {
-    if (TargetItem)
+    if (TargetItem && TargetItem == EquippedItem)
     {
         UInspectWidget* InspectUI = CreateWidget<UInspectWidget>(GetWorld(), UInspectWidget::StaticClass());
         if (InspectUI)
@@ -359,10 +522,24 @@ void UEquipmentSlotWidget::HandleUnequipClicked(UItemInstance* ItemObj)
         {
             FIntPoint Size = ItemObj->GetCurrentSize();
             int32 FreeX, FreeY;
+            if (GM->EquipmentComponent->GetEquippedItem(SlotID) != ItemObj)
+            {
+                return;
+            }
+
             if (GM->InventoryComponent->FindEmptySpace(Size.X, Size.Y, FreeX, FreeY))
             {
-                GM->EquipmentComponent->RemoveItemByInstanceID(ItemObj->InstanceID);
-                GM->InventoryComponent->AddItem(ItemObj, FreeX, FreeY);
+                if (!GM->EquipmentComponent->RemoveItemByInstanceID(ItemObj->InstanceID))
+                {
+                    return;
+                }
+
+                if (!GM->InventoryComponent->AddItem(ItemObj, FreeX, FreeY))
+                {
+                    // 예기치 않은 수납 실패 시 장비를 원래 슬롯으로 복구합니다.
+                    GM->EquipmentComponent->EquipItem(SlotID, ItemObj);
+                    return;
+                }
                 RefreshSlotUI();
                 GM->InventoryComponent->OnInventoryChanged.Broadcast();
             }
@@ -372,10 +549,11 @@ void UEquipmentSlotWidget::HandleUnequipClicked(UItemInstance* ItemObj)
 
 void UEquipmentSlotWidget::HandleUnloadClicked(UItemInstance* ItemObj)
 {
-    if (!ItemObj) return;
+    if (!ItemObj || ItemObj != EquippedItem) return;
 
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
-    if (!GM || !GM->ItemDataTable) return;
+    if (!GM || !GM->ItemDataTable || !GM->EquipmentComponent) return;
+    if (GM->EquipmentComponent->GetEquippedItem(SlotID) != ItemObj) return;
 
     // 1. 무기인 경우: 결합된 탄창을 분리하여 인벤토리에 넣음
     if (ItemObj->Category == EItemCategory::Weapon && ItemObj->EquippedMagazine)
@@ -383,11 +561,12 @@ void UEquipmentSlotWidget::HandleUnloadClicked(UItemInstance* ItemObj)
         UItemInstance* MagItem = ItemObj->EquippedMagazine;
         
         int32 FreeX, FreeY;
-        if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpace(MagItem->GetCurrentSize().X, MagItem->GetCurrentSize().Y, FreeX, FreeY))
+        if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpace(MagItem->GetCurrentSize().X, MagItem->GetCurrentSize().Y, FreeX, FreeY) &&
+            GM->InventoryComponent->AddItem(MagItem, FreeX, FreeY))
         {
-            GM->InventoryComponent->AddItem(MagItem, FreeX, FreeY);
             ItemObj->EquippedMagazine = nullptr;
             
+            ItemObj->OnItemModified.Broadcast();
             RefreshSlotUI();
             GM->InventoryComponent->OnInventoryChanged.Broadcast();
         }
@@ -399,37 +578,40 @@ void UEquipmentSlotWidget::HandleUnloadClicked(UItemInstance* ItemObj)
     {
         if (ItemObj->CurrentAmmo <= 0) return;
 
-        FName AmmoID = TEXT("Ammo_556_M995");
-        if (ItemObj->TemplateID == TEXT("Mag_M4"))
-        {
-            AmmoID = TEXT("Ammo_556_M995");
-        }
+        FName AmmoID = GM->FindCompatibleAmmoID(ItemObj);
+        if (AmmoID == NAME_None) return;
         
         FItemData* AmmoData = GM->ItemDataTable->FindRow<FItemData>(AmmoID, TEXT("Unload"));
         if (!AmmoData) return;
+        if (AmmoData->MaxStack <= 0) return;
 
         int32 AmmoAmount = ItemObj->CurrentAmmo;
-        ItemObj->CurrentAmmo = 0;
 
         while (AmmoAmount > 0)
         {
             int32 StackToSpawn = FMath::Min(AmmoAmount, AmmoData->MaxStack);
-            AmmoAmount -= StackToSpawn;
 
             UItemInstance* NewAmmo = NewObject<UItemInstance>(GM);
-            NewAmmo->InstanceID = FName(*FString::Printf(TEXT("%s_Unloaded_%d"), *AmmoID.ToString(), FMath::RandRange(10000, 99999)));
+            NewAmmo->InstanceID = FName(*FString::Printf(TEXT("%s_Unloaded_%s"), *AmmoID.ToString(), *FGuid::NewGuid().ToString(EGuidFormats::Digits)));
             NewAmmo->InitFromData(*AmmoData);
             NewAmmo->CurrentStack = StackToSpawn;
             NewAmmo->bIsExamined = true;
             NewAmmo->bIsRotated = false;
 
             int32 FreeX, FreeY;
+            bool bAdded = false;
             if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpace(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeX, FreeY))
             {
-                GM->InventoryComponent->AddItem(NewAmmo, FreeX, FreeY);
+                bAdded = GM->InventoryComponent->AddItem(NewAmmo, FreeX, FreeY);
             }
+
+            if (!bAdded) break;
+            AmmoAmount -= StackToSpawn;
         }
 
+        ItemObj->CurrentAmmo = AmmoAmount;
+
+        ItemObj->OnItemModified.Broadcast();
         RefreshSlotUI();
         if (GM->InventoryComponent) GM->InventoryComponent->OnInventoryChanged.Broadcast();
     }

@@ -47,6 +47,14 @@ protected:
     virtual void NativeOnDragEnter(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
     virtual bool NativeOnDragOver(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
     virtual void NativeOnDragLeave(const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
+
+#if WITH_DEV_AUTOMATION_TESTS
+public:
+    bool NativeOnDropForTest(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
+    {
+        return NativeOnDrop(InGeometry, InDragDropEvent, InOperation);
+    }
+#endif
     
 public:
     UFUNCTION()
