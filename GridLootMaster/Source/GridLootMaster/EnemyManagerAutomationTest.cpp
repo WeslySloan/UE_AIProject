@@ -503,4 +503,211 @@ bool FGridLootMasterPlayerAmbushDetectionBreakTest::RunTest(const FString& Param
     return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterDetectionFormulaTest,
+    "GridLootMaster.EnemyWorld.DetectionFormulaSeparatesPerception",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterDetectionFormulaTest::RunTest(const FString& Parameters)
+{
+    AGridGameMode* GameMode = NewObject<AGridGameMode>();
+    TestNotNull(TEXT("Game mode is created for detection formula"), GameMode);
+    if (!GameMode || !GameMode->EnemyManagerComponent || !GameMode->MapManagerComponent ||
+        !GameMode->CombatComponent)
+    {
+        return false;
+    }
+
+    GameMode->MapManagerComponent->InitializeMap();
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->CurrentPlayerCoord = FIntPoint(0, 0);
+    GameMode->PlayerDetectionPower = 0;
+    GameMode->PlayerDetectionRangeTiles = 0;
+    GameMode->PlayerStealth = 0;
+    GameMode->EnemyManagerComponent->InitialSpawnDelayTicks = 100;
+
+    auto SpawnAndAdvance = [&GameMode](int32 DetectionPower, int32 PlayerPerception, int32 PlayerStealth)
+    {
+        GameMode->EnemyManagerComponent->ResetForRaid();
+        GameMode->CombatComponent->ClearEnemy();
+        GameMode->PlayerPerception = PlayerPerception;
+        GameMode->PlayerStealth = PlayerStealth;
+
+        FEnemyDefinition Enemy;
+        Enemy.EnemyID = TEXT("FormulaEnemy");
+        Enemy.VisionRangeTiles = 2;
+        Enemy.DetectionPower = DetectionPower;
+        const bool bSpawned = GameMode->EnemyManagerComponent->SpawnEnemyAt(
+            Enemy, FIntPoint(2, 0), EEnemyBehaviorProfile::GuardZone);
+        GameMode->AdvanceRaidWorldTick();
+        return bSpawned;
+    };
+
+    TestTrue(TEXT("Low player perception setup advances"), SpawnAndAdvance(19, 0, 0));
+    TestFalse(TEXT("Insufficient enemy detection does not start contact"),
+        GameMode->CombatComponent->bHasActiveEnemy);
+
+    TestTrue(TEXT("High player perception setup advances"), SpawnAndAdvance(19, 100, 0));
+    TestFalse(TEXT("Player perception does not improve enemy detection"),
+        GameMode->CombatComponent->bHasActiveEnemy);
+
+    TestTrue(TEXT("Enemy detection power setup advances"), SpawnAndAdvance(20, 0, 0));
+    TestTrue(TEXT("Higher enemy detection power starts contact"),
+        GameMode->CombatComponent->bHasActiveEnemy);
+
+    TestTrue(TEXT("Player stealth setup advances"), SpawnAndAdvance(20, 0, 1));
+    TestFalse(TEXT("Higher player stealth prevents enemy detection"),
+        GameMode->CombatComponent->bHasActiveEnemy);
+
+    GameMode->PlayerDetectionPower = 0;
+    GameMode->PlayerDetectionRangeTiles = 2;
+    GameMode->PlayerStealth = 100;
+    GameMode->EnemyManagerComponent->ResetForRaid();
+    GameMode->CombatComponent->ClearEnemy();
+    GameMode->PlayerPerception = 98;
+    FEnemyDefinition SuspectedEnemy;
+    SuspectedEnemy.EnemyID = TEXT("PlayerPerceptionEnemy");
+    SuspectedEnemy.VisionRangeTiles = 0;
+    SuspectedEnemy.DetectionPower = 0;
+    SuspectedEnemy.Stealth = 79;
+    TestTrue(TEXT("Low player perception setup spawns"),
+        GameMode->EnemyManagerComponent->SpawnEnemyAt(
+            SuspectedEnemy, FIntPoint(2, 0), EEnemyBehaviorProfile::GuardZone));
+    GameMode->AdvanceRaidWorldTick();
+    TestEqual(TEXT("Low player perception leaves the enemy hidden"),
+        GameMode->EnemyManagerComponent->GetEnemyInstances()[0].KnowledgeState,
+        EEnemyKnowledgeState::Hidden);
+
+    GameMode->EnemyManagerComponent->ResetForRaid();
+    GameMode->CombatComponent->ClearEnemy();
+    GameMode->PlayerPerception = 99;
+    TestTrue(TEXT("Higher player perception setup spawns"),
+        GameMode->EnemyManagerComponent->SpawnEnemyAt(
+            SuspectedEnemy, FIntPoint(2, 0), EEnemyBehaviorProfile::GuardZone));
+    GameMode->AdvanceRaidWorldTick();
+    TestEqual(TEXT("Higher player perception makes the enemy suspected"),
+        GameMode->EnemyManagerComponent->GetEnemyInstances()[0].KnowledgeState,
+        EEnemyKnowledgeState::Suspected);
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterEnemyAmbushReactionTest,
+    "GridLootMaster.EnemyWorld.EnemyAmbushReaction",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterEnemyAmbushReactionTest::RunTest(const FString& Parameters)
+{
+    AGridGameMode* GameMode = NewObject<AGridGameMode>();
+    TestNotNull(TEXT("Game mode is created for enemy ambush"), GameMode);
+    if (!GameMode || !GameMode->EnemyManagerComponent || !GameMode->MapManagerComponent || !GameMode->CombatComponent)
+    {
+        return false;
+    }
+
+    GameMode->MapManagerComponent->InitializeMap();
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->CurrentPlayerCoord = FIntPoint(0, 0);
+    GameMode->PreviousPlayerCoord = FIntPoint(0, 0);
+    GameMode->PlayerDetectionPower = -100;
+    UEnemyManagerComponent* EnemyManager = GameMode->EnemyManagerComponent;
+    EnemyManager->InitialSpawnDelayTicks = 100;
+    EnemyManager->MaxAliveEnemies = 1;
+    EnemyManager->ResetForRaid();
+
+    FEnemyDefinition Ambusher;
+    Ambusher.EnemyID = TEXT("C10Ambusher");
+    Ambusher.AttackDamage = 10;
+    Ambusher.ReactionTimeSeconds = 100.0f;
+    Ambusher.VisionRangeTiles = 0;
+    Ambusher.DetectionPower = 0;
+    Ambusher.Stealth = 0;
+
+    TestTrue(TEXT("An Ambusher within range starts a reaction"),
+        EnemyManager->SpawnEnemyAt(Ambusher, FIntPoint(0, 1), EEnemyBehaviorProfile::Ambusher));
+    GameMode->AdvanceRaidWorldTick();
+    TestTrue(TEXT("Ambush reaction waits for player choice"), EnemyManager->HasActiveAmbushReaction());
+    TestFalse(TEXT("Ambush reaction does not start combat immediately"), GameMode->CombatComponent->bHasActiveEnemy);
+    const int32 ReactionTick = EnemyManager->RaidWorldTick;
+    GameMode->AdvanceRaidWorldTick();
+    TestEqual(TEXT("World tick stops during ambush reaction"), EnemyManager->RaidWorldTick, ReactionTick);
+
+    EnemyManager->ForcedAmbushRollForTest = 1;
+    GameMode->CurrentHealth = GameMode->MaxHealth;
+    TestTrue(TEXT("SEARCH success enters normal combat"), GameMode->RequestAmbushSearch());
+    TestTrue(TEXT("SEARCH success does not grant a free attack"), GameMode->CurrentHealth == GameMode->MaxHealth);
+    TestTrue(TEXT("SEARCH success reveals the enemy"),
+        EnemyManager->GetEnemyInstances()[0].KnowledgeState == EEnemyKnowledgeState::Revealed);
+
+    GameMode->CombatComponent->ClearEnemy();
+    EnemyManager->ResetForRaid();
+    GameMode->CurrentHealth = GameMode->MaxHealth;
+    TestTrue(TEXT("A second Ambusher is spawned for SEARCH failure"),
+        EnemyManager->SpawnEnemyAt(Ambusher, FIntPoint(0, 1), EEnemyBehaviorProfile::Ambusher));
+    GameMode->AdvanceRaidWorldTick();
+    EnemyManager->ForcedAmbushRollForTest = 100;
+    TestTrue(TEXT("SEARCH failure still enters normal combat"), GameMode->RequestAmbushSearch());
+    TestEqual(TEXT("SEARCH failure applies exactly one surprise attack"), GameMode->CurrentHealth, GameMode->MaxHealth - 10);
+
+    GameMode->CombatComponent->ClearEnemy();
+    EnemyManager->ResetForRaid();
+    GameMode->CurrentPlayerCoord = FIntPoint(0, 1);
+    GameMode->PreviousPlayerCoord = FIntPoint(0, 0);
+    TestTrue(TEXT("An Ambusher is spawned for FLEE"),
+        EnemyManager->SpawnEnemyAt(Ambusher, FIntPoint(0, 2), EEnemyBehaviorProfile::Ambusher));
+    GameMode->AdvanceRaidWorldTick();
+    EnemyManager->ForcedAmbushRollForTest = 1;
+    TestTrue(TEXT("FLEE success ends the reaction"), GameMode->RequestAmbushFlee());
+    TestFalse(TEXT("FLEE success avoids combat"), GameMode->CombatComponent->bHasActiveEnemy);
+    TestEqual(TEXT("FLEE success restores the previous adjacent tile"), GameMode->CurrentPlayerCoord, FIntPoint(0, 0));
+
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterEnemyAmbushCoverTest,
+    "GridLootMaster.EnemyWorld.EnemyAmbushCover",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterEnemyAmbushCoverTest::RunTest(const FString& Parameters)
+{
+    AGridGameMode* GameMode = NewObject<AGridGameMode>();
+    if (!GameMode || !GameMode->EnemyManagerComponent || !GameMode->MapManagerComponent || !GameMode->CombatComponent)
+    {
+        return false;
+    }
+    GameMode->MapManagerComponent->InitializeMap();
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->CurrentPlayerCoord = FIntPoint(0, 0);
+    GameMode->PlayerDetectionPower = -100;
+    GameMode->EnemyManagerComponent->InitialSpawnDelayTicks = 100;
+    GameMode->EnemyManagerComponent->ResetForRaid();
+
+    FEnemyDefinition Ambusher;
+    Ambusher.EnemyID = TEXT("C10CoverAmbusher");
+    Ambusher.AttackDamage = 100;
+    Ambusher.ReactionTimeSeconds = 100.0f;
+    Ambusher.VisionRangeTiles = 0;
+    Ambusher.DetectionPower = 0;
+    const int32 StartingHealth = GameMode->MaxHealth;
+    auto TestCoverDamage = [&](FIntPoint Coordinate, int32 ExpectedDamage)
+    {
+        GameMode->CombatComponent->ClearEnemy();
+        GameMode->EnemyManagerComponent->ResetForRaid();
+        GameMode->CurrentHealth = StartingHealth;
+        TestTrue(TEXT("Cover test Ambusher is spawned"),
+            GameMode->EnemyManagerComponent->SpawnEnemyAt(Ambusher, Coordinate, EEnemyBehaviorProfile::Ambusher));
+        GameMode->AdvanceRaidWorldTick();
+        TestTrue(TEXT("Cover test enters ambush reaction"), GameMode->EnemyManagerComponent->HasActiveAmbushReaction());
+        TestTrue(TEXT("COVER applies the MapCover damage tier"), GameMode->RequestAmbushCover());
+        TestEqual(TEXT("COVER damage matches the expected reduction"),
+            StartingHealth - GameMode->CurrentHealth, ExpectedDamage);
+    };
+
+    TestCoverDamage(FIntPoint(0, 1), 75);
+    TestCoverDamage(FIntPoint(1, 1), 50);
+    return true;
+}
+
 #endif

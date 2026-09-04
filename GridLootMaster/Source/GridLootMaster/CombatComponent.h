@@ -47,6 +47,12 @@ struct GRIDLOOTMASTER_API FEnemyDefinition
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|Detection")
     int32 Stealth = 0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|Ambush")
+    int32 AmbushRangeTiles = 1;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy|Ambush")
+    int32 AmbushPower = 50;
 };
 
 USTRUCT(BlueprintType)
@@ -152,7 +158,7 @@ public:
     bool RequestReload(FName WeaponSlot = NAME_None);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
-    void EnemyAttackPlayer();
+    void EnemyAttackPlayer(float DamageMultiplier = 1.0f);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
     void ClearEnemy();

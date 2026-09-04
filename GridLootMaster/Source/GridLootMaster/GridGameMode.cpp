@@ -230,19 +230,60 @@ void AGridGameMode::HandlePlayerMoved(FIntPoint NewCoordinate)
         return;
     }
 
-    CurrentPlayerCoord = NewCoordinate;
+    if (MapManagerComponent && CurrentPlayerCoord != NewCoordinate &&
+        MapManagerComponent->CanMoveBetween(CurrentPlayerCoord, NewCoordinate))
+    {
+        PreviousPlayerCoord = CurrentPlayerCoord;
+        CurrentPlayerCoord = NewCoordinate;
+        if (EnemyManagerComponent)
+        {
+            EnemyManagerComponent->TryStartEnemyAmbushAtCurrentPlayer();
+        }
+    }
 }
 
 void AGridGameMode::AdvanceRaidWorldTick()
 {
     if (RaidState != ERaidState::InRaid ||
         (CombatComponent && CombatComponent->bHasActiveEnemy) ||
-        !EnemyManagerComponent)
+        !EnemyManagerComponent || EnemyManagerComponent->HasActiveAmbushReaction())
     {
         return;
     }
 
     EnemyManagerComponent->AdvanceWorldTick();
+}
+
+bool AGridGameMode::RequestAmbushSearch()
+{
+    return RaidState == ERaidState::InRaid && EnemyManagerComponent && CombatComponent &&
+        !CombatComponent->bHasActiveEnemy && EnemyManagerComponent->RequestAmbushSearch();
+}
+
+bool AGridGameMode::RequestAmbushCover()
+{
+    return RaidState == ERaidState::InRaid && EnemyManagerComponent && CombatComponent &&
+        !CombatComponent->bHasActiveEnemy && EnemyManagerComponent->RequestAmbushCover();
+}
+
+bool AGridGameMode::RequestAmbushFlee()
+{
+    return RaidState == ERaidState::InRaid && EnemyManagerComponent && CombatComponent &&
+        !CombatComponent->bHasActiveEnemy && EnemyManagerComponent->RequestAmbushFlee();
+}
+
+bool AGridGameMode::TryRestorePreviousPlayerCoord()
+{
+    if (RaidState != ERaidState::InRaid || !MapManagerComponent ||
+        PreviousPlayerCoord == CurrentPlayerCoord ||
+        MapManagerComponent->GetTileDistance(CurrentPlayerCoord, PreviousPlayerCoord) != 1 ||
+        !MapManagerComponent->CanMoveBetween(CurrentPlayerCoord, PreviousPlayerCoord))
+    {
+        return false;
+    }
+
+    CurrentPlayerCoord = PreviousPlayerCoord;
+    return true;
 }
 
 bool AGridGameMode::RequestPlayerAmbush()
@@ -627,6 +668,7 @@ bool AGridGameMode::StartRaid()
     }
     MapManagerComponent->InitializeMap();
     CurrentPlayerCoord = MapManagerComponent->SpawnPoint;
+    PreviousPlayerCoord = CurrentPlayerCoord;
     if (MainUI)
     {
         MainUI->ShowEventNotification(TEXT(""));

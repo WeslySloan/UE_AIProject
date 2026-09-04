@@ -20,12 +20,20 @@ void UEnemyManagerComponent::ResetForRaid()
     RaidWorldTick = 0;
     NextSpawnTick = FMath::Max(0, InitialSpawnDelayTicks);
     SpawnRandomStream.Initialize(SpawnSeed);
+    AmbushRandomStream.Initialize(AmbushSeed);
+    AmbushReactionState = EEnemyAmbushReactionState::None;
+    ActiveAmbushInstanceID = NAME_None;
 }
 
 void UEnemyManagerComponent::AdvanceWorldTick()
 {
     const AGridGameMode* GameMode = Cast<AGridGameMode>(GetOwner());
     if (!GameMode || GameMode->RaidState != ERaidState::InRaid)
+    {
+        return;
+    }
+
+    if (AmbushReactionState != EEnemyAmbushReactionState::None)
     {
         return;
     }
@@ -155,21 +163,191 @@ bool UEnemyManagerComponent::StartPlayerAmbushContact(FName InstanceID)
             continue;
         }
 
-        Instance.KnowledgeState = EEnemyKnowledgeState::Revealed;
-        Instance.bRevealedToPlayer = true;
-        Instance.WorldState = EEnemyWorldState::InCombat;
-        ActiveEnemyInstanceID = Instance.InstanceID;
-        GameMode->CombatComponent->SpawnEnemy(Instance.Definition, true);
-        if (GameMode->CombatComponent->bHasActiveEnemy)
-        {
-            return true;
-        }
+        return StartEnemyContact(Instance, true);
+    }
 
-        Instance.WorldState = EEnemyWorldState::Idle;
-        ActiveEnemyInstanceID = NAME_None;
+    return false;
+}
+
+bool UEnemyManagerComponent::HasActiveAmbushReaction() const
+{
+    return AmbushReactionState != EEnemyAmbushReactionState::None;
+}
+
+FName UEnemyManagerComponent::GetActiveAmbushInstanceID() const
+{
+    return ActiveAmbushInstanceID;
+}
+
+bool UEnemyManagerComponent::TryStartEnemyAmbushAtCurrentPlayer()
+{
+    AGridGameMode* GameMode = Cast<AGridGameMode>(GetOwner());
+    if (!GameMode || !GameMode->CombatComponent || GameMode->CombatComponent->bHasActiveEnemy ||
+        HasActiveAmbushReaction())
+    {
         return false;
     }
 
+    for (FEnemyWorldInstance& Instance : EnemyInstances)
+    {
+        if (TryStartEnemyAmbush(Instance))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool UEnemyManagerComponent::TryStartEnemyAmbush(FEnemyWorldInstance& Instance)
+{
+    const AGridGameMode* GameMode = Cast<AGridGameMode>(GetOwner());
+    const UMapManagerComponent* MapManager = GameMode ? GameMode->MapManagerComponent : nullptr;
+    if (!GameMode || !MapManager || GameMode->RaidState != ERaidState::InRaid ||
+        !Instance.bAlive || Instance.BehaviorProfile != EEnemyBehaviorProfile::Ambusher ||
+        Instance.KnowledgeState != EEnemyKnowledgeState::Hidden ||
+        MapManager->GetTileDistance(GameMode->CurrentPlayerCoord, Instance.Coordinate) >
+            FMath::Max(0, Instance.Definition.AmbushRangeTiles) ||
+        !MapManager->HasLineOfSight(GameMode->CurrentPlayerCoord, Instance.Coordinate))
+    {
+        return false;
+    }
+
+    Instance.WorldState = EEnemyWorldState::Ambushing;
+    AmbushReactionState = EEnemyAmbushReactionState::WaitingForPlayerChoice;
+    ActiveAmbushInstanceID = Instance.InstanceID;
+    return true;
+}
+
+bool UEnemyManagerComponent::StartEnemyContact(FEnemyWorldInstance& Instance, bool bGrantPlayerInitiative)
+{
+    AGridGameMode* GameMode = Cast<AGridGameMode>(GetOwner());
+    if (!GameMode || !GameMode->CombatComponent || GameMode->CombatComponent->bHasActiveEnemy)
+    {
+        return false;
+    }
+
+    Instance.KnowledgeState = EEnemyKnowledgeState::Revealed;
+    Instance.bRevealedToPlayer = true;
+    Instance.WorldState = EEnemyWorldState::InCombat;
+    ActiveEnemyInstanceID = Instance.InstanceID;
+    GameMode->CombatComponent->SpawnEnemy(Instance.Definition, bGrantPlayerInitiative);
+    if (GameMode->CombatComponent->bHasActiveEnemy)
+    {
+        return true;
+    }
+
+    Instance.WorldState = EEnemyWorldState::Idle;
+    ActiveEnemyInstanceID = NAME_None;
+    return false;
+}
+
+bool UEnemyManagerComponent::ResolveAmbushAttack(float DamageMultiplier)
+{
+    for (FEnemyWorldInstance& Instance : EnemyInstances)
+    {
+        if (Instance.InstanceID == ActiveAmbushInstanceID && Instance.bAlive)
+        {
+            const bool bStarted = StartEnemyContact(Instance);
+            AmbushReactionState = EEnemyAmbushReactionState::None;
+            ActiveAmbushInstanceID = NAME_None;
+            if (bStarted)
+            {
+                CastChecked<AGridGameMode>(GetOwner())->CombatComponent->EnemyAttackPlayer(DamageMultiplier);
+            }
+            return bStarted;
+        }
+    }
+    return false;
+}
+
+int32 UEnemyManagerComponent::GetCoverValueAt(FIntPoint Coordinate) const
+{
+    const AGridGameMode* GameMode = Cast<AGridGameMode>(GetOwner());
+    const UMapManagerComponent* MapManager = GameMode ? GameMode->MapManagerComponent : nullptr;
+    FTileData TileData;
+    if (!MapManager || !MapManager->GetTileData(Coordinate.X, Coordinate.Y, TileData))
+    {
+        return 0;
+    }
+
+    int32 ClosedEdges = 0;
+    if (Coordinate.X > 0 && !TileData.bOpenWest) ++ClosedEdges;
+    if (Coordinate.X + 1 < MapManager->MapWidth && !TileData.bOpenEast) ++ClosedEdges;
+    if (Coordinate.Y > 0 && !TileData.bOpenNorth) ++ClosedEdges;
+    if (Coordinate.Y + 1 < MapManager->MapHeight && !TileData.bOpenSouth) ++ClosedEdges;
+    return ClosedEdges == 0 ? 0 : ClosedEdges == 1 ? 25 : ClosedEdges == 2 ? 50 : 75;
+}
+
+int32 UEnemyManagerComponent::RollAmbushPercent()
+{
+#if WITH_DEV_AUTOMATION_TESTS
+    if (ForcedAmbushRollForTest >= 0)
+    {
+        return ForcedAmbushRollForTest;
+    }
+#endif
+    return AmbushRandomStream.RandRange(1, 100);
+}
+
+bool UEnemyManagerComponent::RequestAmbushSearch()
+{
+    if (AmbushReactionState != EEnemyAmbushReactionState::WaitingForPlayerChoice)
+    {
+        return false;
+    }
+    for (FEnemyWorldInstance& Instance : EnemyInstances)
+    {
+        if (Instance.InstanceID != ActiveAmbushInstanceID || !Instance.bAlive) continue;
+        const AGridGameMode* GameMode = Cast<AGridGameMode>(GetOwner());
+        const int32 Chance = FMath::Clamp(50 + GameMode->PlayerPerception - Instance.Definition.Stealth -
+            Instance.Definition.AmbushPower, 10, 90);
+        if (RollAmbushPercent() <= Chance)
+        {
+            AmbushReactionState = EEnemyAmbushReactionState::None;
+            ActiveAmbushInstanceID = NAME_None;
+            return StartEnemyContact(Instance);
+        }
+        return ResolveAmbushAttack(1.0f);
+    }
+    return false;
+}
+
+bool UEnemyManagerComponent::RequestAmbushCover()
+{
+    if (AmbushReactionState != EEnemyAmbushReactionState::WaitingForPlayerChoice)
+    {
+        return false;
+    }
+    for (FEnemyWorldInstance& Instance : EnemyInstances)
+    {
+        if (Instance.InstanceID == ActiveAmbushInstanceID && Instance.bAlive)
+        {
+            return ResolveAmbushAttack((100.0f - GetCoverValueAt(Instance.Coordinate)) / 100.0f);
+        }
+    }
+    return false;
+}
+
+bool UEnemyManagerComponent::RequestAmbushFlee()
+{
+    if (AmbushReactionState != EEnemyAmbushReactionState::WaitingForPlayerChoice)
+    {
+        return false;
+    }
+    for (FEnemyWorldInstance& Instance : EnemyInstances)
+    {
+        if (Instance.InstanceID != ActiveAmbushInstanceID || !Instance.bAlive) continue;
+        AGridGameMode* GameMode = Cast<AGridGameMode>(GetOwner());
+        const int32 Chance = FMath::Clamp(50 + GameMode->PlayerMobility - Instance.Definition.AmbushPower, 10, 90);
+        if (RollAmbushPercent() <= Chance && GameMode->TryRestorePreviousPlayerCoord())
+        {
+            Instance.WorldState = EEnemyWorldState::Idle;
+            AmbushReactionState = EEnemyAmbushReactionState::None;
+            ActiveAmbushInstanceID = NAME_None;
+            return true;
+        }
+        return ResolveAmbushAttack(1.0f);
+    }
     return false;
 }
 
@@ -373,6 +551,11 @@ void UEnemyManagerComponent::EvaluateDetectionAndContact()
             Instance.KnowledgeState = EEnemyKnowledgeState::Suspected;
         }
 
+        if (TryStartEnemyAmbush(Instance))
+        {
+            return;
+        }
+
         if (!DoesEnemyDetectPlayer(Instance))
         {
             continue;
@@ -447,7 +630,7 @@ bool UEnemyManagerComponent::DoesEnemyDetectPlayer(const FEnemyWorldInstance& In
         return false;
     }
 
-    const int32 DetectionScore = Instance.Definition.DetectionPower + GameMode->PlayerPerception -
+    const int32 DetectionScore = Instance.Definition.DetectionPower -
         GameMode->PlayerStealth - Distance * 10;
     return DetectionScore >= 0;
 }

@@ -79,6 +79,9 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Map")
     FIntPoint CurrentPlayerCoord;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Map")
+    FIntPoint PreviousPlayerCoord;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raid|Detection")
     int32 PlayerPerception = 50;
 
@@ -90,6 +93,9 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raid|Detection")
     int32 PlayerDetectionPower = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raid|Ambush")
+    int32 PlayerMobility = 50;
 
     UPROPERTY(BlueprintAssignable, Category = "Game|Events")
     FOnGameStateChanged OnGameStateChanged;
@@ -145,6 +151,17 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Raid|Ambush")
     bool RequestAmbushAssault();
+
+    UFUNCTION(BlueprintCallable, Category = "Raid|Ambush")
+    bool RequestAmbushSearch();
+
+    UFUNCTION(BlueprintCallable, Category = "Raid|Ambush")
+    bool RequestAmbushCover();
+
+    UFUNCTION(BlueprintCallable, Category = "Raid|Ambush")
+    bool RequestAmbushFlee();
+
+    bool TryRestorePreviousPlayerCoord();
 
 #if WITH_DEV_AUTOMATION_TESTS
     void GameTimerUpdateForTest();

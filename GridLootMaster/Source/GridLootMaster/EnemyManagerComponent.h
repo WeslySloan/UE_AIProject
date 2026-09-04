@@ -37,6 +37,13 @@ enum class EEnemyKnowledgeState : uint8
 };
 
 UENUM()
+enum class EEnemyAmbushReactionState : uint8
+{
+    None,
+    WaitingForPlayerChoice
+};
+
+UENUM()
 enum class EGridFacingDirection : uint8
 {
     North,
@@ -113,6 +120,9 @@ public:
     UPROPERTY(EditAnywhere, Category = "Enemy World|Spawn")
     int32 SpawnSeed = 1337;
 
+    UPROPERTY(EditAnywhere, Category = "Enemy World|Ambush")
+    int32 AmbushSeed = 7331;
+
     UPROPERTY(EditAnywhere, Category = "Enemy World|Spawn")
     FEnemyDefinition ScheduledEnemyDefinition;
 
@@ -142,6 +152,13 @@ public:
 
     bool StartPlayerAmbushContact(FName InstanceID);
 
+    bool HasActiveAmbushReaction() const;
+    FName GetActiveAmbushInstanceID() const;
+    bool RequestAmbushSearch();
+    bool RequestAmbushCover();
+    bool RequestAmbushFlee();
+    bool TryStartEnemyAmbushAtCurrentPlayer();
+
     const TArray<FEnemyWorldInstance>& GetEnemyInstances() const;
 
 private:
@@ -151,6 +168,11 @@ private:
     void AdvanceEnemyMovement();
     bool MoveRandomWanderEnemy(int32 EnemyIndex);
     void EvaluateDetectionAndContact();
+    bool TryStartEnemyAmbush(FEnemyWorldInstance& Instance);
+    bool StartEnemyContact(FEnemyWorldInstance& Instance, bool bGrantPlayerInitiative = false);
+    bool ResolveAmbushAttack(float DamageMultiplier);
+    int32 GetCoverValueAt(FIntPoint Coordinate) const;
+    int32 RollAmbushPercent();
     void SyncCombatContact();
     bool DoesEnemyDetectPlayer(const FEnemyWorldInstance& Instance) const;
     bool DoesPlayerSuspectEnemy(const FEnemyWorldInstance& Instance) const;
@@ -161,7 +183,19 @@ private:
 
     TMap<FIntPoint, FName> OccupiedTiles;
     FRandomStream SpawnRandomStream;
+    FRandomStream AmbushRandomStream;
 
     UPROPERTY(VisibleAnywhere, Category = "Enemy World|Contact")
     FName ActiveEnemyInstanceID;
+
+    UPROPERTY(VisibleAnywhere, Category = "Enemy World|Ambush")
+    EEnemyAmbushReactionState AmbushReactionState = EEnemyAmbushReactionState::None;
+
+    UPROPERTY(VisibleAnywhere, Category = "Enemy World|Ambush")
+    FName ActiveAmbushInstanceID;
+
+#if WITH_DEV_AUTOMATION_TESTS
+public:
+    int32 ForcedAmbushRollForTest = -1;
+#endif
 };

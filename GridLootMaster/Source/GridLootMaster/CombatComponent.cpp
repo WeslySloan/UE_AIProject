@@ -280,7 +280,7 @@ bool UCombatComponent::RequestReload(FName WeaponSlot)
     return true;
 }
 
-void UCombatComponent::EnemyAttackPlayer()
+void UCombatComponent::EnemyAttackPlayer(float DamageMultiplier)
 {
     if (AGridGameMode* GM = Cast<AGridGameMode>(GetOwner()))
     {
@@ -296,11 +296,13 @@ void UCombatComponent::EnemyAttackPlayer()
         return;
     }
 
-    LastCombatMessage = FString::Printf(TEXT("적의 반격! %d 피해를 입었습니다."), CurrentEnemy.Definition.AttackDamage);
+    const int32 ModifiedDamage = FMath::Max(1, FMath::CeilToInt(
+        static_cast<float>(CurrentEnemy.Definition.AttackDamage) * FMath::Clamp(DamageMultiplier, 0.0f, 1.0f)));
+    LastCombatMessage = FString::Printf(TEXT("적의 반격! %d 피해를 입었습니다."), ModifiedDamage);
 
     if (AGridGameMode* GM = Cast<AGridGameMode>(GetOwner()))
     {
-        GM->ApplyPlayerDamage(CurrentEnemy.Definition.AttackDamage);
+        GM->ApplyPlayerDamage(ModifiedDamage);
         if (GM->RaidState == ERaidState::InRaid)
         {
             OnCombatStateChanged.Broadcast();
