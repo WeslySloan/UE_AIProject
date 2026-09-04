@@ -15,6 +15,13 @@ enum class ERaidState : uint8
     Failed      UMETA(DisplayName = "Failed")
 };
 
+UENUM(BlueprintType)
+enum class EPlayerRaidPosture : uint8
+{
+    Normal,
+    Ambushing
+};
+
 class UGridInventoryComponent;
 class UEquipmentComponent;
 class UMainGameUI;
@@ -22,6 +29,7 @@ class UItemInstance;
 class UItemDataTable;
 class UMapManagerComponent;
 class UCombatComponent;
+class UEnemyManagerComponent;
 
 UCLASS()
 class GRIDLOOTMASTER_API AGridGameMode : public AGameModeBase
@@ -65,8 +73,23 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Raid")
     ERaidState RaidState;
 
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Raid|Posture")
+    EPlayerRaidPosture PlayerPosture = EPlayerRaidPosture::Normal;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Map")
     FIntPoint CurrentPlayerCoord;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raid|Detection")
+    int32 PlayerPerception = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raid|Detection")
+    int32 PlayerStealth = 50;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raid|Detection")
+    int32 PlayerDetectionRangeTiles = 2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Raid|Detection")
+    int32 PlayerDetectionPower = 50;
 
     UPROPERTY(BlueprintAssignable, Category = "Game|Events")
     FOnGameStateChanged OnGameStateChanged;
@@ -85,6 +108,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Raid")
     bool StartRaid();
 
+#if WITH_DEV_AUTOMATION_TESTS
+    void SetRaidStartPointForTest(FIntPoint StartPoint);
+#endif
+
     UFUNCTION(BlueprintCallable, Category = "Stash")
     bool SaveStash();
 
@@ -99,6 +126,25 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Raid")
     void FailRaid();
+
+    void AdvanceRaidWorldTick();
+
+#if WITH_DEV_AUTOMATION_TESTS
+    bool bHasForcedRaidStartPointForTest = false;
+    FIntPoint ForcedRaidStartPointForTest = FIntPoint::ZeroValue;
+#endif
+
+    UFUNCTION(BlueprintCallable, Category = "Raid|Ambush")
+    bool RequestPlayerAmbush();
+
+    UFUNCTION(BlueprintCallable, Category = "Raid|Ambush")
+    bool RequestAmbushWait();
+
+    UFUNCTION(BlueprintCallable, Category = "Raid|Ambush")
+    bool RequestAmbushLetPass();
+
+    UFUNCTION(BlueprintCallable, Category = "Raid|Ambush")
+    bool RequestAmbushAssault();
 
 #if WITH_DEV_AUTOMATION_TESTS
     void GameTimerUpdateForTest();
@@ -141,8 +187,8 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
     UCombatComponent* CombatComponent;
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    int32 EncounterChancePercent = 25;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Enemy World")
+    UEnemyManagerComponent* EnemyManagerComponent;
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
     void HandlePlayerMoved(FIntPoint NewCoordinate);

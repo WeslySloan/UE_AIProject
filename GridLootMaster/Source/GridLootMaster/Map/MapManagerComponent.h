@@ -51,6 +51,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Map Data")
     bool CanMoveBetween(FIntPoint From, FIntPoint To) const;
 
+    UFUNCTION(BlueprintCallable, Category = "Map Data")
+    int32 GetTileDistance(FIntPoint From, FIntPoint To) const;
+
+    UFUNCTION(BlueprintCallable, Category = "Map Data")
+    bool HasLineOfSight(FIntPoint From, FIntPoint To) const;
+
     // A* (에이스타) 길찾기 알고리즘을 사용하여 최단 경로 반환 (막힌 벽 회피)
     UFUNCTION(BlueprintCallable, Category = "Map Data")
     TArray<FIntPoint> FindPath(FIntPoint StartPoint, FIntPoint TargetPoint);

@@ -1,0 +1,39 @@
+﻿Name,ItemID,ItemName,Category,Rarity,Size,MaxStack,AttachmentType,CompatibleAmmo,MaxAmmo,Value,DropWeight,Weight,ItemIcon,Damage,Armor,WeaponAttackType,BaseAccuracyPercent,AttackIntervalSeconds,OptimalRangeTiles,MaxRangeTiles,RecoilPerShot,RecoilRecoveryPerSecond,SwapTimeSeconds,ReloadTimeSeconds,NoiseRadiusTiles
+Glock19,Glock19,Glock 19,Weapon,Common,"(X=2,Y=1)",1,None,9x19mm,0,8000,1200,1.0,,20,0,Firearm,90,0.70,1,2,8.0,8.0,0.35,1.30,3
+MP5,MP5,MP5,Weapon,Common,"(X=3,Y=2)",1,None,9x19mm,0,24000,600,2.5,,18,0,Firearm,84,0.40,1,3,13.0,12.0,0.55,1.60,4
+Mosin,Mosin,Mosin Nagant,Weapon,Common,"(X=5,Y=2)",1,None,7.62x54mmR,0,15000,800,4.0,,45,0,Firearm,94,1.40,3,5,24.0,18.0,0.90,2.40,7
+AK74M,AK74M,AK-74M,Weapon,Common,"(X=4,Y=2)",1,None,5.45x39mm,0,35000,400,3.4,,28,0,Firearm,80,0.70,2,3,18.0,12.0,0.75,1.90,5
+M4A1,M4A1,M4A1,Weapon,Common,"(X=4,Y=2)",1,None,5.56x45mm,0,65000,150,2.9,,25,0,Firearm,88,0.60,2,3,13.0,14.0,0.70,1.80,5
+PACA,PACA,PACA Body Armor,Armor,Common,"(X=3,Y=3)",1,None,,0,18000,800,3.0,,0,5,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+6B23,6B23,6B23-1 Armor,Armor,Uncommon,"(X=3,Y=3)",1,None,,0,32000,500,7.0,,0,15,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Slick,Slick,Slick Plate Carrier,Armor,Legendary,"(X=3,Y=3)",1,None,,0,150000,50,4.5,,0,25,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+6B47,6B47,6B47 Helmet,Helmet,Uncommon,"(X=2,Y=2)",1,None,,0,22000,600,1.2,,0,5,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+FASTMT,FASTMT,FAST MT Helmet,Helmet,Epic,"(X=2,Y=2)",1,None,,0,75000,100,1.0,,0,10,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Ammo_9x19,Ammo_9x19,9x19mm PST,Consumable,Common,"(X=1,Y=1)",50,None,,0,50,1000,0.1,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Ammo_545_BT,Ammo_545_BT,5.45x39mm BT,Consumable,Rare,"(X=1,Y=1)",60,None,,0,300,500,0.1,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Ammo_556_M995,Ammo_556_M995,5.56x45mm M995,Consumable,Epic,"(X=1,Y=1)",60,None,,0,800,100,0.1,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Med_Bandage,Med_Bandage,Bandage,Consumable,Common,"(X=1,Y=1)",1,None,,0,1500,900,0.1,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Med_AI2,Med_AI2,AI-2 Medkit,Consumable,Common,"(X=1,Y=1)",1,None,,0,3500,700,0.2,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Med_Salewa,Med_Salewa,Salewa First Aid,Consumable,Rare,"(X=2,Y=1)",1,None,,0,12000,300,0.5,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Med_Morphine,Med_Morphine,Morphine Injector,Consumable,Epic,"(X=1,Y=1)",1,None,,0,25000,150,0.1,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Junk_Cigarettes,Junk_Cigarettes,Cigarettes,Valuable,Common,"(X=1,Y=1)",1,None,,0,2500,800,0.1,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Junk_DuctTape,Junk_DuctTape,Duct Tape,Valuable,Common,"(X=1,Y=1)",1,None,,0,3000,700,0.2,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Junk_Bolts,Junk_Bolts,Bolts,Valuable,Uncommon,"(X=1,Y=1)",1,None,,0,8000,600,0.3,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Junk_CarBattery,Junk_CarBattery,Car Battery,Valuable,Rare,"(X=3,Y=2)",1,None,,0,45000,250,15.0,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Val_GoldChain,Val_GoldChain,Gold Chain,Valuable,Rare,"(X=1,Y=1)",1,None,,0,35000,200,0.1,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Val_Rolex,Val_Rolex,Rolex Watch,Valuable,Epic,"(X=1,Y=1)",1,None,,0,65000,100,0.1,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Val_GPU,Val_GPU,GPU,Valuable,Legendary,"(X=2,Y=2)",1,None,,0,180000,40,1.0,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Val_Bitcoin,Val_Bitcoin,Bitcoin,Valuable,Mythic,"(X=1,Y=1)",1,None,,0,350000,10,0.1,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Scope_Cobra,Scope_Cobra,Cobra Reflex Sight,Attachment,Uncommon,"(X=1,Y=1)",1,Sight,,0,12000,400,0.3,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Scope_Holo,Scope_Holo,EOTech Holo Sight,Attachment,Rare,"(X=1,Y=1)",1,Sight,,0,38000,200,0.4,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Scope_ACOG,Scope_ACOG,ACOG 4x Scope,Attachment,Epic,"(X=2,Y=1)",1,Sight,,0,55000,100,0.6,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Muzzle_9mm,Muzzle_9mm,9mm Suppressor,Attachment,Rare,"(X=2,Y=1)",1,Muzzle,,0,32000,200,0.4,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Muzzle_556,Muzzle_556,5.56 Suppressor,Attachment,Epic,"(X=2,Y=1)",1,Muzzle,,0,70000,100,0.5,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Mag_M4,Mag_M4,M4_Mag,Attachment,Common,"(X=1,Y=2)",1,Magazine,5.56x45mm,30,5000,100,0.3,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+DefaultBackpack,DefaultBackpack,Standard Backpack,Backpack,Common,"(X=2,Y=2)",1,None,,0,1000,0,1.0,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+DefaultRig,DefaultRig,Standard Chest Rig,Rig,Common,"(X=2,Y=2)",1,None,,0,1000,0,1.0,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Mag_Glock19,Mag_Glock19,Glock 19 Magazine,Attachment,Common,"(X=1,Y=2)",1,Magazine,9x19mm,15,2500,100,0.2,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Mag_MP5,Mag_MP5,MP5 Magazine,Attachment,Common,"(X=2,Y=2)",1,Magazine,9x19mm,30,4500,100,0.3,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Mag_AK74M,Mag_AK74M,AK-74M Magazine,Attachment,Common,"(X=2,Y=2)",1,Magazine,5.45x39mm,30,5000,100,0.3,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Mag_Mosin,Mag_Mosin,Mosin Internal Magazine,Attachment,Common,"(X=1,Y=2)",1,Magazine,7.62x54mmR,5,3500,100,0.3,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0
+Ammo_762x54R,Ammo_762x54R,7.62x54mmR LPS,Consumable,Common,"(X=1,Y=1)",20,None,,0,1200,100,0.1,,0,0,Firearm,100,1.0,1,3,0.0,0.0,0.0,0.0,0

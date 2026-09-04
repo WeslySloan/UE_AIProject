@@ -165,6 +165,12 @@ bool UModSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEv
 
     if (ItemDropOp->ItemObj->Category != EItemCategory::Attachment || ItemDropOp->ItemObj->AttachmentType != AllowedType) return false;
 
+    if (AllowedType == EAttachmentType::Magazine &&
+        !WeaponObj->IsCompatibleMagazine(ItemDropOp->ItemObj))
+    {
+        return false;
+    }
+
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
     if (!GM || !GM->InventoryComponent || !GM->EquipmentComponent) return false;
     if (EquippedMod == ItemDropOp->ItemObj) return false;

@@ -83,6 +83,36 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "Combat")
     int32 Armor;
 
+    UPROPERTY(BlueprintReadWrite, Category = "Combat|Weapon")
+    EWeaponAttackType WeaponAttackType;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat|Weapon")
+    int32 BaseAccuracyPercent;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat|Weapon")
+    float AttackIntervalSeconds;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat|Weapon")
+    int32 OptimalRangeTiles;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat|Weapon")
+    int32 MaxRangeTiles;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat|Weapon")
+    float RecoilPerShot;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat|Weapon")
+    float RecoilRecoveryPerSecond;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat|Weapon")
+    float SwapTimeSeconds;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat|Weapon")
+    float ReloadTimeSeconds;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Combat|Weapon")
+    int32 NoiseRadiusTiles;
+
     // 아이템 생성 시 데이터 테이블 행을 바탕으로 초기화하는 함수
     UFUNCTION(BlueprintCallable, Category = "Item Instance")
     void InitFromData(const struct FItemData& InData);
@@ -124,5 +154,16 @@ public:
 
         return Ammo->ItemName.Contains(CompatibleAmmo, ESearchCase::IgnoreCase) ||
             Ammo->TemplateID.ToString().Contains(CompatibleAmmo, ESearchCase::IgnoreCase);
+    }
+
+    bool IsCompatibleMagazine(const UItemInstance* Magazine) const
+    {
+        if (!Magazine || Magazine->Category != EItemCategory::Attachment ||
+            Magazine->AttachmentType != EAttachmentType::Magazine)
+        {
+            return false;
+        }
+        return CompatibleAmmo.IsEmpty() || Magazine->CompatibleAmmo.IsEmpty() ||
+            CompatibleAmmo.Equals(Magazine->CompatibleAmmo, ESearchCase::IgnoreCase);
     }
 };

@@ -509,18 +509,33 @@ void UMainGameUI::OnExtractButtonClicked()
 FReply UMainGameUI::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
     FKey Key = InKeyEvent.GetKey();
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
     if (Key == EKeys::One)
     {
-        ActiveWeaponSlot = TEXT("Primary1");
-        if (WeaponSlot1) WeaponSlot1->SetHighlight(true);
-        if (WeaponSlot2) WeaponSlot2->SetHighlight(false);
+        if (GM && GM->CombatComponent)
+        {
+            GM->CombatComponent->RequestWeaponSwap(TEXT("Primary1"));
+        }
         return FReply::Handled();
     }
     else if (Key == EKeys::Two)
     {
-        ActiveWeaponSlot = TEXT("Primary2");
-        if (WeaponSlot1) WeaponSlot1->SetHighlight(false);
-        if (WeaponSlot2) WeaponSlot2->SetHighlight(true);
+        if (GM && GM->CombatComponent)
+        {
+            GM->CombatComponent->RequestWeaponSwap(TEXT("Primary2"));
+        }
+        return FReply::Handled();
+    }
+    else if (Key == EKeys::R)
+    {
+        if (GM && GM->CombatComponent)
+        {
+            if (!GM->CombatComponent->RequestReload() &&
+                !GM->CombatComponent->LastCombatMessage.IsEmpty())
+            {
+                QueueEventNotification(GM->CombatComponent->LastCombatMessage);
+            }
+        }
         return FReply::Handled();
     }
     return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
@@ -559,9 +574,16 @@ void UMainGameUI::UpdateHealth(int32 NewHealth, int32 NewMaxHealth)
 void UMainGameUI::UpdateCombatUI()
 {
     UpdateActionAvailability();
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GM && GM->CombatComponent)
+    {
+        ActiveWeaponSlot = GM->CombatComponent->ActiveWeaponSlot;
+        if (WeaponSlot1) WeaponSlot1->SetHighlight(ActiveWeaponSlot == TEXT("Primary1"));
+        if (WeaponSlot2) WeaponSlot2->SetHighlight(ActiveWeaponSlot == TEXT("Primary2"));
+    }
+
     if (!CombatText) return;
 
-    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
     if (!GM || !GM->CombatComponent || GM->RaidState != ERaidState::InRaid ||
         GM->CombatComponent->CurrentEnemy.Definition.EnemyID.IsNone())
     {
@@ -766,37 +788,42 @@ void UMainGameUI::OnBangButtonClicked()
         return;
     }
 
-    if (!ActiveWeapon->EquippedMagazine)
-    {
-        QueueEventNotification(TEXT("탄창이 장착되지 않았습니다."));
-        return;
-    }
-
-    if (ActiveWeapon->EquippedMagazine->CurrentAmmo <= 0)
-    {
-        QueueEventNotification(TEXT("탄약이 없습니다."));
-        return;
-    }
-
     if (ActiveWeapon->Damage <= 0)
     {
         QueueEventNotification(TEXT("이 무기로 공격할 수 없습니다."));
         return;
     }
 
-    ActiveWeapon->EquippedMagazine->CurrentAmmo--;
-    ActiveWeapon->EquippedMagazine->OnItemModified.Broadcast();
-    ActiveWeapon->OnItemModified.Broadcast();
-
-    if (!GM->CombatComponent->AttackEnemy(ActiveWeapon->Damage))
+    const bool bNeedsAmmo = ActiveWeapon->WeaponAttackType == EWeaponAttackType::Firearm;
+    if (bNeedsAmmo && !ActiveWeapon->EquippedMagazine)
     {
-        ++ActiveWeapon->EquippedMagazine->CurrentAmmo;
-        ActiveWeapon->EquippedMagazine->OnItemModified.Broadcast();
-        ActiveWeapon->OnItemModified.Broadcast();
+        QueueEventNotification(TEXT("탄창이 장착되지 않았습니다."));
         return;
     }
 
-    GM->CombatComponent->EnemyAttackPlayer();
+    if (bNeedsAmmo && ActiveWeapon->EquippedMagazine->CurrentAmmo <= 0)
+    {
+        QueueEventNotification(TEXT("탄약이 없습니다."));
+        return;
+    }
+
+    if (!GM->CombatComponent->RequestPlayerAttack(ActiveWeapon->Damage,
+        ActiveWeapon->BaseAccuracyPercent, ActiveWeapon->AttackIntervalSeconds, ActiveWeapon->MaxRangeTiles,
+        ActiveWeapon->RecoilPerShot, ActiveWeapon->RecoilRecoveryPerSecond, ActiveWeapon->OptimalRangeTiles))
+    {
+        if (!GM->CombatComponent->LastCombatMessage.IsEmpty())
+        {
+            QueueEventNotification(GM->CombatComponent->LastCombatMessage);
+        }
+        return;
+    }
+
+    if (bNeedsAmmo)
+    {
+        ActiveWeapon->EquippedMagazine->CurrentAmmo--;
+        ActiveWeapon->EquippedMagazine->OnItemModified.Broadcast();
+        ActiveWeapon->OnItemModified.Broadcast();
+    }
 
     // 소음기 장착 여부 확인 (Muzzle 부착물이 있으면 소음기로 간주)
     bool bIsSilenced = (ActiveWeapon->EquippedMuzzle != nullptr);

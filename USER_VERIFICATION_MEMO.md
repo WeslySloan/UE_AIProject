@@ -17,6 +17,8 @@
 - 맵 타일 배치, 색상, 벽·장애물 규칙 또는 참고 이미지
 - 전투 인카운터 개편에 대한 최종 기획 의견
 - 아이템 아이콘 에셋 또는 사용할 아이콘 스타일/경로
+- 아이템 전투 스탯 원본 CSV(열: `WeaponAttackType`, `BaseAccuracyPercent`, `AttackIntervalSeconds`, `OptimalRangeTiles`, `MaxRangeTiles`, `RecoilPerShot`, `RecoilRecoveryPerSecond`, `SwapTimeSeconds`, `ReloadTimeSeconds`, `NoiseRadiusTiles`)
+- 무기별 수치가 아직 확정되지 않았다면, 사용할 초기 밸런스 값과 Firearm/Melee 구분 기준
 
 ## 3. 현재 보류하는 항목
 
@@ -25,4 +27,8 @@
 
 ## 4. 자동화 검증 참고
 
-자동화 테스트는 사용자 저장 슬롯과 분리된 GUID 기반 임시 슬롯을 사용하며, 현재 전체 68개 테스트가 실제 실행·통과했다. 사용자 저장 슬롯 `GridLootMaster_Stash`는 기본 게임 동작에서만 사용하고 테스트로 덮어쓰지 않는다.
+자동화 테스트는 사용자 저장 슬롯과 분리된 GUID 기반 임시 슬롯을 사용하며, 현재 전체 83개 테스트가 실제 실행·통과했다. 사용자 저장 슬롯 `GridLootMaster_Stash`는 기본 게임 동작에서만 사용하고 테스트로 덮어쓰지 않는다.
+
+전투 수동 확인 시 전투 중 `1/2` 무기 교체가 즉시 바뀌지 않고 지연 후 완료되는지, `R` 입력으로 재장전이 시작되는지, 교체·재장전 중 공격이 차단되는지, 재장전 완료 후 탄창과 Inventory 탄약 수량이 정확히 반영되는지 확인한다. 재장전 진행률 UI는 아직 C11 잔여 범위다.
+
+매복 수동 확인 시 레이드에서 비전투 상태로 매복을 시작하고, `WAIT`가 월드 Tick을 소비하는지, 의심된 적에 대한 `ASSAULT`가 플레이어 선제권으로 전투를 시작하는지, 적에게 먼저 탐지되면 매복이 해제되는지 확인한다. 매복 버튼과 접근 대상 선택 UI는 아직 C11 범위다.

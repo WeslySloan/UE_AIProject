@@ -40,6 +40,13 @@ enum class EItemRarity : uint8
     Mythic      UMETA(DisplayName = "Mythic (Red)")
 };
 
+UENUM(BlueprintType)
+enum class EWeaponAttackType : uint8
+{
+    Firearm     UMETA(DisplayName = "Firearm"),
+    Melee       UMETA(DisplayName = "Melee")
+};
+
 /**
  * 게임 내 아이템의 기본 정보를 정의하는 데이터 구조체입니다.
  * UDataTable의 행(Row)으로 사용될 수 있습니다.
@@ -106,6 +113,36 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
     int32 Armor;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Weapon")
+    EWeaponAttackType WeaponAttackType;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Weapon")
+    int32 BaseAccuracyPercent;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Weapon")
+    float AttackIntervalSeconds;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Weapon")
+    int32 OptimalRangeTiles;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Weapon")
+    int32 MaxRangeTiles;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Weapon")
+    float RecoilPerShot;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Weapon")
+    float RecoilRecoveryPerSecond;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Weapon")
+    float SwapTimeSeconds;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Weapon")
+    float ReloadTimeSeconds;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Weapon")
+    int32 NoiseRadiusTiles;
+
     FItemData()
         : ItemID(NAME_None)
         , ItemName(TEXT("Unknown"))
@@ -120,5 +157,15 @@ public:
         , Weight(1.0f)
         , Damage(0)
         , Armor(0)
+        , WeaponAttackType(EWeaponAttackType::Firearm)
+        , BaseAccuracyPercent(100)
+        , AttackIntervalSeconds(1.0f)
+        , OptimalRangeTiles(1)
+        , MaxRangeTiles(3)
+        , RecoilPerShot(0.0f)
+        , RecoilRecoveryPerSecond(0.0f)
+        , SwapTimeSeconds(0.0f)
+        , ReloadTimeSeconds(0.0f)
+        , NoiseRadiusTiles(0)
     {}
 };

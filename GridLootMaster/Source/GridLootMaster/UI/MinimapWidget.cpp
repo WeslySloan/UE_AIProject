@@ -322,13 +322,16 @@ void UMinimapWidget::OnAdvanceClicked()
         return;
     }
 
+    bool bWorldTickCommitted = false;
     CurrentMoveProgress++;
+    bWorldTickCommitted = true;
     if (CurrentMoveProgress >= 3)
     {
         // 3턴 경과 시 다음 칸으로 이동
         CurrentMoveProgress = 0;
         if (!MovePlayerTo(CurrentPath[0])) // Path의 첫번째가 다음 칸
         {
+            bWorldTickCommitted = false;
             CurrentPath.Empty();
             CurrentTargetCoord = CurrentPlayerCoord;
             if (AdvanceButton)
@@ -355,8 +358,11 @@ void UMinimapWidget::OnAdvanceClicked()
     
     UpdateAdvanceButtonText();
     PublishMovementState();
-    
-    // TODO: 여기서 1턴 경과 이벤트(허기 감소, 랜덤 인카운터 굴림 등) 호출
+
+    if (bWorldTickCommitted)
+    {
+        GM->AdvanceRaidWorldTick();
+    }
 }
 
 void UMinimapWidget::UpdateAdvanceButtonText()

@@ -116,6 +116,12 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                             AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
                             EAttachmentType ModType = ItemDropOp->ItemObj->AttachmentType;
 
+                            if (ModType == EAttachmentType::Magazine &&
+                                !ExistingItemObj->IsCompatibleMagazine(ItemDropOp->ItemObj))
+                            {
+                                return false;
+                            }
+
                             const bool bSlotAvailable =
                                 (ModType == EAttachmentType::Sight && !ExistingItemObj->EquippedSight) ||
                                 (ModType == EAttachmentType::Muzzle && !ExistingItemObj->EquippedMuzzle) ||

@@ -11,6 +11,7 @@
 #include "Misc/AutomationTest.h"
 #include "UObject/UObjectIterator.h"
 #include "CombatComponent.h"
+#include "EnemyManagerComponent.h"
 #include "GridGameMode.h"
 #include "GridInventoryComponent.h"
 #include "ItemData.h"
@@ -55,6 +56,290 @@ bool FGridLootMasterCombatBasicFlowTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("Defeated enemy health is clamped to zero"), Combat->CurrentEnemy.CurrentHealth, 0);
     TestFalse(TEXT("Attack is rejected after defeat"), Combat->AttackEnemy(30));
 
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterItemCombatStatsTest,
+    "GridLootMaster.Combat.ItemCombatStats",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterItemCombatStatsTest::RunTest(const FString& Parameters)
+{
+    FItemData WeaponData;
+    WeaponData.ItemID = TEXT("TestMelee");
+    WeaponData.Category = EItemCategory::Weapon;
+    WeaponData.Damage = 30;
+    WeaponData.WeaponAttackType = EWeaponAttackType::Melee;
+    WeaponData.BaseAccuracyPercent = 82;
+    WeaponData.AttackIntervalSeconds = 0.75f;
+    WeaponData.OptimalRangeTiles = 1;
+    WeaponData.MaxRangeTiles = 1;
+    WeaponData.RecoilPerShot = 2.0f;
+    WeaponData.RecoilRecoveryPerSecond = 1.0f;
+    WeaponData.SwapTimeSeconds = 0.5f;
+    WeaponData.ReloadTimeSeconds = 0.0f;
+    WeaponData.NoiseRadiusTiles = 0;
+
+    UItemInstance* Item = NewObject<UItemInstance>();
+    TestNotNull(TEXT("Item instance is created for combat stat mapping"), Item);
+    if (!Item) return false;
+
+    Item->InitFromData(WeaponData);
+    TestEqual(TEXT("Attack type is copied from item data"), Item->WeaponAttackType, EWeaponAttackType::Melee);
+    TestEqual(TEXT("Accuracy is copied from item data"), Item->BaseAccuracyPercent, 82);
+    TestTrue(TEXT("Attack interval is copied from item data"),
+        FMath::IsNearlyEqual(Item->AttackIntervalSeconds, 0.75f));
+    TestEqual(TEXT("Maximum range is copied from item data"), Item->MaxRangeTiles, 1);
+    TestTrue(TEXT("Recoil is copied from item data"), FMath::IsNearlyEqual(Item->RecoilPerShot, 2.0f));
+    TestTrue(TEXT("Swap time is copied from item data"), FMath::IsNearlyEqual(Item->SwapTimeSeconds, 0.5f));
+
+    FItemData LegacyData;
+    LegacyData.ItemID = TEXT("LegacyWeapon");
+    LegacyData.Category = EItemCategory::Weapon;
+    LegacyData.Damage = 25;
+    LegacyData.BaseAccuracyPercent = 0;
+    LegacyData.AttackIntervalSeconds = 0.0f;
+    LegacyData.OptimalRangeTiles = 0;
+    LegacyData.MaxRangeTiles = 0;
+
+    UItemInstance* LegacyItem = NewObject<UItemInstance>();
+    TestNotNull(TEXT("Legacy item instance is created"), LegacyItem);
+    if (!LegacyItem) return false;
+
+    LegacyItem->InitFromData(LegacyData);
+    TestEqual(TEXT("Legacy rows receive safe accuracy default"), LegacyItem->BaseAccuracyPercent, 100);
+    TestTrue(TEXT("Legacy rows receive safe attack interval default"),
+        FMath::IsNearlyEqual(LegacyItem->AttackIntervalSeconds, 1.0f));
+    TestEqual(TEXT("Legacy rows receive safe maximum range default"), LegacyItem->MaxRangeTiles, 3);
+
+    UItemInstance* CompatibleWeapon = NewObject<UItemInstance>();
+    UItemInstance* MatchingMagazine = NewObject<UItemInstance>();
+    UItemInstance* WrongMagazine = NewObject<UItemInstance>();
+    CompatibleWeapon->Category = EItemCategory::Weapon;
+    CompatibleWeapon->CompatibleAmmo = TEXT("5.56x45mm");
+    MatchingMagazine->Category = EItemCategory::Attachment;
+    MatchingMagazine->AttachmentType = EAttachmentType::Magazine;
+    MatchingMagazine->CompatibleAmmo = TEXT("5.56x45mm");
+    WrongMagazine->Category = EItemCategory::Attachment;
+    WrongMagazine->AttachmentType = EAttachmentType::Magazine;
+    WrongMagazine->CompatibleAmmo = TEXT("9x19mm");
+    TestTrue(TEXT("Matching magazine caliber is accepted"), CompatibleWeapon->IsCompatibleMagazine(MatchingMagazine));
+    TestFalse(TEXT("Mismatched magazine caliber is rejected"), CompatibleWeapon->IsCompatibleMagazine(WrongMagazine));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterCombatRecoilTest,
+    "GridLootMaster.Combat.RecoilChangesAccuracyAndRecovers",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterCombatRecoilTest::RunTest(const FString& Parameters)
+{
+    UWorld* GameWorld = nullptr;
+    if (GEngine)
+    {
+        for (const FWorldContext& Context : GEngine->GetWorldContexts())
+        {
+            if (Context.World() && Context.World()->IsGameWorld())
+            {
+                GameWorld = Context.World();
+                break;
+            }
+        }
+    }
+
+    TestNotNull(TEXT("A game world is available for recoil"), GameWorld);
+    if (!GameWorld) return false;
+
+    AGridGameMode* GameMode = Cast<AGridGameMode>(GameWorld->GetAuthGameMode());
+    TestNotNull(TEXT("The active game mode is GridLootMaster"), GameMode);
+    if (!GameMode || !GameMode->CombatComponent) return false;
+
+    const ERaidState PreviousRaidState = GameMode->RaidState;
+    const int32 PreviousHealth = GameMode->CurrentHealth;
+    const float PreviousInterval = GameMode->CombatComponent->PlayerAttackIntervalSeconds;
+    const int32 PreviousAccuracy = GameMode->CombatComponent->PlayerAccuracyPercent;
+    const float PreviousRecoil = GameMode->CombatComponent->PlayerRecoilPerShot;
+    const float PreviousRecovery = GameMode->CombatComponent->PlayerRecoilRecoveryPerSecond;
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->CurrentHealth = 100;
+    GameMode->CombatComponent->PlayerAttackIntervalSeconds = 0.1f;
+    GameMode->CombatComponent->PlayerAccuracyPercent = 100;
+    GameMode->CombatComponent->PlayerRecoilPerShot = 100.0f;
+    GameMode->CombatComponent->PlayerRecoilRecoveryPerSecond = 0.0f;
+    GameMode->CombatComponent->ClearEnemy();
+
+    FEnemyDefinition Enemy;
+    Enemy.EnemyID = TEXT("RecoilEnemy");
+    Enemy.MaxHealth = 100;
+    Enemy.ReactionTimeSeconds = 100.0f;
+    GameMode->CombatComponent->SpawnEnemy(Enemy);
+    TestTrue(TEXT("Recoil test enemy is activated"), GameMode->CombatComponent->bHasActiveEnemy);
+
+    TestTrue(TEXT("First shot is accepted and hits"),
+        GameMode->CombatComponent->RequestPlayerAttack(10));
+    TestEqual(TEXT("First shot applies damage"), GameMode->CombatComponent->CurrentEnemy.CurrentHealth, 90);
+    TestTrue(TEXT("Recoil accumulates after a shot"), GameMode->CombatComponent->CurrentRecoil > 0.0f);
+
+    GameMode->CombatComponent->AdvanceCombatTimeForTest(0.1f);
+    TestTrue(TEXT("Second shot is accepted after the interval"),
+        GameMode->CombatComponent->RequestPlayerAttack(10));
+    TestFalse(TEXT("Accumulated recoil reduces the second shot to a miss"),
+        GameMode->CombatComponent->bLastPlayerAttackHit);
+    TestEqual(TEXT("Recoil miss leaves enemy health unchanged"),
+        GameMode->CombatComponent->CurrentEnemy.CurrentHealth, 90);
+
+    GameMode->CombatComponent->PlayerRecoilRecoveryPerSecond = 100.0f;
+    GameMode->CombatComponent->AdvanceCombatTimeForTest(1.0f);
+    TestTrue(TEXT("Recoil recovers over time"),
+        FMath::IsNearlyZero(GameMode->CombatComponent->CurrentRecoil));
+    TestTrue(TEXT("A recovered shot hits again"),
+        GameMode->CombatComponent->RequestPlayerAttack(10));
+    TestEqual(TEXT("Recovered shot applies damage"), GameMode->CombatComponent->CurrentEnemy.CurrentHealth, 80);
+
+    GameMode->CombatComponent->ClearEnemy();
+    GameMode->CombatComponent->PlayerAttackIntervalSeconds = PreviousInterval;
+    GameMode->CombatComponent->PlayerAccuracyPercent = PreviousAccuracy;
+    GameMode->CombatComponent->PlayerRecoilPerShot = PreviousRecoil;
+    GameMode->CombatComponent->PlayerRecoilRecoveryPerSecond = PreviousRecovery;
+    GameMode->CurrentHealth = PreviousHealth;
+    GameMode->RaidState = PreviousRaidState;
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterCombatWeaponSwapTest,
+    "GridLootMaster.Combat.WeaponSwapDelayAndAttackGuard",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterCombatWeaponSwapTest::RunTest(const FString& Parameters)
+{
+    AGridGameMode* GameMode = NewObject<AGridGameMode>();
+    TestNotNull(TEXT("A game mode is created for weapon swap"), GameMode);
+    if (!GameMode || !GameMode->EquipmentComponent || !GameMode->CombatComponent) return false;
+
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->EquipmentComponent->ClearEquipment();
+
+    UItemInstance* WeaponOne = NewObject<UItemInstance>(GameMode);
+    UItemInstance* WeaponTwo = NewObject<UItemInstance>(GameMode);
+    WeaponOne->InstanceID = TEXT("SwapWeaponOne");
+    WeaponOne->ItemName = TEXT("Weapon One");
+    WeaponOne->Category = EItemCategory::Weapon;
+    WeaponOne->WeaponAttackType = EWeaponAttackType::Melee;
+    WeaponOne->Damage = 10;
+    WeaponTwo->InstanceID = TEXT("SwapWeaponTwo");
+    WeaponTwo->ItemName = TEXT("Weapon Two");
+    WeaponTwo->Category = EItemCategory::Weapon;
+    WeaponTwo->WeaponAttackType = EWeaponAttackType::Melee;
+    WeaponTwo->Damage = 10;
+    WeaponTwo->SwapTimeSeconds = 0.5f;
+
+    TestTrue(TEXT("Primary weapon one is equipped"),
+        GameMode->EquipmentComponent->EquipItem(TEXT("Primary1"), WeaponOne));
+    TestTrue(TEXT("Primary weapon two is equipped"),
+        GameMode->EquipmentComponent->EquipItem(TEXT("Primary2"), WeaponTwo));
+
+    GameMode->CombatComponent->ActiveWeaponSlot = TEXT("Primary1");
+    TestTrue(TEXT("Out-of-combat weapon swap is immediate"),
+        GameMode->CombatComponent->RequestWeaponSwap(TEXT("Primary2")));
+    TestEqual(TEXT("Immediate swap activates the target slot"),
+        GameMode->CombatComponent->ActiveWeaponSlot, FName(TEXT("Primary2")));
+
+    GameMode->CombatComponent->ActiveWeaponSlot = TEXT("Primary1");
+    FEnemyDefinition Enemy;
+    Enemy.EnemyID = TEXT("SwapEnemy");
+    Enemy.ReactionTimeSeconds = 100.0f;
+    GameMode->CombatComponent->SpawnEnemy(Enemy);
+    TestTrue(TEXT("Swap test enemy is active"), GameMode->CombatComponent->bHasActiveEnemy);
+
+    TestTrue(TEXT("In-combat weapon swap is accepted as a delayed action"),
+        GameMode->CombatComponent->RequestWeaponSwap(TEXT("Primary2")));
+    TestEqual(TEXT("Target weapon is not active before swap completes"),
+        GameMode->CombatComponent->ActiveWeaponSlot, FName(TEXT("Primary1")));
+    TestEqual(TEXT("Combat enters swapping state"),
+        GameMode->CombatComponent->PlayerActionState, ECombatPlayerActionState::Swapping);
+    TestFalse(TEXT("Attack is rejected while swapping"),
+        GameMode->CombatComponent->RequestPlayerAttack(10));
+
+    GameMode->CombatComponent->AdvanceCombatTimeForTest(0.49f);
+    TestEqual(TEXT("Swap remains pending before its delay expires"),
+        GameMode->CombatComponent->ActiveWeaponSlot, FName(TEXT("Primary1")));
+    GameMode->CombatComponent->AdvanceCombatTimeForTest(0.01f);
+    TestEqual(TEXT("Swap completion activates the target weapon"),
+        GameMode->CombatComponent->ActiveWeaponSlot, FName(TEXT("Primary2")));
+    TestEqual(TEXT("Combat action returns to idle after swap"),
+        GameMode->CombatComponent->PlayerActionState, ECombatPlayerActionState::None);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterCombatReloadTransactionTest,
+    "GridLootMaster.Combat.ReloadDelayAndAmmoTransaction",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterCombatReloadTransactionTest::RunTest(const FString& Parameters)
+{
+    AGridGameMode* GameMode = NewObject<AGridGameMode>();
+    TestNotNull(TEXT("A game mode is created for reload"), GameMode);
+    if (!GameMode || !GameMode->EquipmentComponent || !GameMode->InventoryComponent || !GameMode->CombatComponent)
+    {
+        return false;
+    }
+
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->EquipmentComponent->ClearEquipment();
+    GameMode->InventoryComponent->InitializeGrid(4, 1);
+
+    UItemInstance* Weapon = NewObject<UItemInstance>(GameMode);
+    Weapon->InstanceID = TEXT("ReloadWeapon");
+    Weapon->ItemName = TEXT("Reload Weapon");
+    Weapon->Category = EItemCategory::Weapon;
+    Weapon->WeaponAttackType = EWeaponAttackType::Firearm;
+    Weapon->Damage = 10;
+    Weapon->ReloadTimeSeconds = 0.8f;
+
+    UItemInstance* Magazine = NewObject<UItemInstance>(GameMode);
+    Magazine->InstanceID = TEXT("ReloadMagazine");
+    Magazine->Category = EItemCategory::Attachment;
+    Magazine->AttachmentType = EAttachmentType::Magazine;
+    Magazine->CompatibleAmmo = TEXT("5.56");
+    Magazine->MaxAmmo = 5;
+    Magazine->CurrentAmmo = 1;
+    Weapon->EquippedMagazine = Magazine;
+    TestTrue(TEXT("Reload weapon is equipped"),
+        GameMode->EquipmentComponent->EquipItem(TEXT("Primary1"), Weapon));
+
+    UItemInstance* Ammo = NewObject<UItemInstance>(GameMode);
+    Ammo->InstanceID = TEXT("ReloadAmmo");
+    Ammo->TemplateID = TEXT("Ammo_556");
+    Ammo->ItemName = TEXT("5.56 Ammo");
+    Ammo->Category = EItemCategory::Consumable;
+    Ammo->BaseSize = FIntPoint(1, 1);
+    Ammo->CurrentStack = 4;
+    Ammo->MaxStack = 30;
+    TestTrue(TEXT("Compatible ammo is placed in inventory"),
+        GameMode->InventoryComponent->AddItem(Ammo, 0, 0));
+
+    GameMode->CombatComponent->ActiveWeaponSlot = TEXT("Primary1");
+    TestTrue(TEXT("Reload request is accepted"),
+        GameMode->CombatComponent->RequestReload());
+    TestEqual(TEXT("Reload enters the delayed action state"),
+        GameMode->CombatComponent->PlayerActionState, ECombatPlayerActionState::Reloading);
+    TestEqual(TEXT("Magazine is not committed before reload completes"), Magazine->CurrentAmmo, 1);
+    TestEqual(TEXT("Ammo is not consumed before reload completes"), Ammo->CurrentStack, 4);
+    TestFalse(TEXT("Attack is rejected while reloading"),
+        GameMode->CombatComponent->RequestPlayerAttack(10));
+
+    GameMode->CombatComponent->AdvanceCombatTimeForTest(0.79f);
+    TestEqual(TEXT("Reload remains pending before its delay expires"), Magazine->CurrentAmmo, 1);
+    GameMode->CombatComponent->AdvanceCombatTimeForTest(0.01f);
+    TestEqual(TEXT("Reload fills only the available magazine capacity"), Magazine->CurrentAmmo, 5);
+    TestNull(TEXT("Fully consumed ammo is removed from inventory"),
+        GameMode->InventoryComponent->GetItemInstance(Ammo->InstanceID));
+    TestEqual(TEXT("Reload action returns to idle"),
+        GameMode->CombatComponent->PlayerActionState, ECombatPlayerActionState::None);
     return true;
 }
 
@@ -575,9 +860,7 @@ bool FGridLootMasterCombatActionAvailabilityTest::RunTest(const FString& Paramet
     }
 
     const ERaidState PreviousRaidState = GameMode->RaidState;
-    const int32 PreviousEncounterChance = GameMode->EncounterChancePercent;
     GameMode->CombatComponent->ClearEnemy();
-    GameMode->EncounterChancePercent = 0;
 
     GameMode->RaidState = ERaidState::Lobby;
     UI->UpdateActionAvailability();
@@ -663,7 +946,6 @@ bool FGridLootMasterCombatActionAvailabilityTest::RunTest(const FString& Paramet
         UI->ToggleModeButton->GetVisibility(), ESlateVisibility::Hidden);
 
     GameMode->RaidState = PreviousRaidState;
-    GameMode->EncounterChancePercent = PreviousEncounterChance;
     if (ActiveUI) ActiveUI->ShowEventNotification(TEXT(""));
     UI->RemoveFromParent();
     return true;
@@ -681,17 +963,43 @@ bool FGridLootMasterCombatDataTableTest::RunTest(const FString& Parameters)
     if (!ItemDataTable) return false;
 
     const FItemData* WeaponData = ItemDataTable->FindRow<FItemData>(TEXT("M4A1"), TEXT("CombatDataTableTest"));
+    const FItemData* GlockData = ItemDataTable->FindRow<FItemData>(TEXT("Glock19"), TEXT("CombatDataTableTest"));
+    const FItemData* MP5Data = ItemDataTable->FindRow<FItemData>(TEXT("MP5"), TEXT("CombatDataTableTest"));
+    const FItemData* MosinData = ItemDataTable->FindRow<FItemData>(TEXT("Mosin"), TEXT("CombatDataTableTest"));
+    const FItemData* AK74MData = ItemDataTable->FindRow<FItemData>(TEXT("AK74M"), TEXT("CombatDataTableTest"));
     const FItemData* ArmorData = ItemDataTable->FindRow<FItemData>(TEXT("PACA"), TEXT("CombatDataTableTest"));
     const FItemData* MagazineData = ItemDataTable->FindRow<FItemData>(TEXT("Mag_M4"), TEXT("CombatDataTableTest"));
     TestNotNull(TEXT("M4A1 row exists"), WeaponData);
+    TestNotNull(TEXT("Glock19 row exists"), GlockData);
+    TestNotNull(TEXT("MP5 row exists"), MP5Data);
+    TestNotNull(TEXT("Mosin row exists"), MosinData);
+    TestNotNull(TEXT("AK74M row exists"), AK74MData);
     TestNotNull(TEXT("PACA row exists"), ArmorData);
     TestNotNull(TEXT("M4 magazine row exists"), MagazineData);
-    if (!WeaponData || !ArmorData || !MagazineData) return false;
+    if (!WeaponData || !GlockData || !MP5Data || !MosinData || !AK74MData || !ArmorData || !MagazineData) return false;
 
     TestEqual(TEXT("M4A1 damage is imported from CSV"), WeaponData->Damage, 25);
     TestEqual(TEXT("PACA armor is imported from CSV"), ArmorData->Armor, 5);
     TestEqual(TEXT("M4 magazine capacity is imported from CSV"), MagazineData->MaxAmmo, 30);
     TestEqual(TEXT("M4 magazine ammo compatibility is imported from CSV"), MagazineData->CompatibleAmmo, FString(TEXT("5.56x45mm")));
+    TestEqual(TEXT("Glock19 damage is imported from CSV"), GlockData->Damage, 20);
+    TestEqual(TEXT("Glock19 accuracy is imported from CSV"), GlockData->BaseAccuracyPercent, 90);
+    TestTrue(TEXT("Glock19 interval is imported from CSV"), FMath::IsNearlyEqual(GlockData->AttackIntervalSeconds, 0.70f));
+    TestEqual(TEXT("Glock19 optimal range is imported from CSV"), GlockData->OptimalRangeTiles, 1);
+    TestEqual(TEXT("Glock19 maximum range is imported from CSV"), GlockData->MaxRangeTiles, 2);
+    TestTrue(TEXT("Glock19 recoil is imported from CSV"), FMath::IsNearlyEqual(GlockData->RecoilPerShot, 8.0f));
+    TestTrue(TEXT("Glock19 recoil recovery is imported from CSV"), FMath::IsNearlyEqual(GlockData->RecoilRecoveryPerSecond, 8.0f));
+    TestTrue(TEXT("Glock19 swap time is imported from CSV"), FMath::IsNearlyEqual(GlockData->SwapTimeSeconds, 0.35f));
+    TestTrue(TEXT("Glock19 reload time is imported from CSV"), FMath::IsNearlyEqual(GlockData->ReloadTimeSeconds, 1.30f));
+    TestEqual(TEXT("Glock19 noise radius is imported from CSV"), GlockData->NoiseRadiusTiles, 3);
+    TestEqual(TEXT("MP5 damage is imported from CSV"), MP5Data->Damage, 18);
+    TestTrue(TEXT("MP5 interval is imported from CSV"), FMath::IsNearlyEqual(MP5Data->AttackIntervalSeconds, 0.40f));
+    TestEqual(TEXT("MP5 maximum range is imported from CSV"), MP5Data->MaxRangeTiles, 3);
+    TestEqual(TEXT("Mosin damage is imported from CSV"), MosinData->Damage, 45);
+    TestEqual(TEXT("Mosin optimal range is imported from CSV"), MosinData->OptimalRangeTiles, 3);
+    TestEqual(TEXT("Mosin maximum range is imported from CSV"), MosinData->MaxRangeTiles, 5);
+    TestEqual(TEXT("AK74M damage is imported from CSV"), AK74MData->Damage, 28);
+    TestTrue(TEXT("AK74M recoil is imported from CSV"), FMath::IsNearlyEqual(AK74MData->RecoilPerShot, 18.0f));
 
     return true;
 }
@@ -832,9 +1140,7 @@ bool FGridLootMasterMinimapInitialDisplayTest::RunTest(const FString& Parameters
     TestNotNull(TEXT("The active game mode is GridLootMaster"), GameMode);
     if (!GameMode || !GameMode->CombatComponent || !GameMode->MapManagerComponent) return false;
 
-    const int32 PreviousEncounterChance = GameMode->EncounterChancePercent;
     const ERaidState PreviousRaidState = GameMode->RaidState;
-    GameMode->EncounterChancePercent = 100;
     GameMode->RaidState = ERaidState::InRaid;
     GameMode->CombatComponent->ClearEnemy();
     GameMode->MapManagerComponent->InitializeMap();
@@ -843,7 +1149,6 @@ bool FGridLootMasterMinimapInitialDisplayTest::RunTest(const FString& Parameters
     TestNotNull(TEXT("Minimap widget is created"), Minimap);
     if (!Minimap)
     {
-        GameMode->EncounterChancePercent = PreviousEncounterChance;
         GameMode->RaidState = PreviousRaidState;
         return false;
     }
@@ -855,7 +1160,6 @@ bool FGridLootMasterMinimapInitialDisplayTest::RunTest(const FString& Parameters
 
     Minimap->RemoveFromParent();
     GameMode->CombatComponent->ClearEnemy();
-    GameMode->EncounterChancePercent = PreviousEncounterChance;
     GameMode->RaidState = PreviousRaidState;
     return true;
 }
@@ -887,9 +1191,7 @@ bool FGridLootMasterMinimapPathLockTest::RunTest(const FString& Parameters)
     TestNotNull(TEXT("The active game mode is GridLootMaster"), GameMode);
     if (!GameMode || !GameMode->MapManagerComponent) return false;
 
-    const int32 PreviousEncounterChance = GameMode->EncounterChancePercent;
     const ERaidState PreviousRaidState = GameMode->RaidState;
-    GameMode->EncounterChancePercent = 0;
     GameMode->RaidState = ERaidState::InRaid;
     GameMode->CombatComponent->ClearEnemy();
     GameMode->MapManagerComponent->InitializeMap();
@@ -898,7 +1200,6 @@ bool FGridLootMasterMinimapPathLockTest::RunTest(const FString& Parameters)
     TestNotNull(TEXT("Minimap widget is created"), Minimap);
     if (!Minimap)
     {
-        GameMode->EncounterChancePercent = PreviousEncounterChance;
         GameMode->RaidState = PreviousRaidState;
         return false;
     }
@@ -919,7 +1220,6 @@ bool FGridLootMasterMinimapPathLockTest::RunTest(const FString& Parameters)
 
     Minimap->RemoveFromParent();
     GameMode->CombatComponent->ClearEnemy();
-    GameMode->EncounterChancePercent = PreviousEncounterChance;
     GameMode->RaidState = PreviousRaidState;
     return true;
 }
@@ -1005,9 +1305,7 @@ bool FGridLootMasterCombatResumesMovementTest::RunTest(const FString& Parameters
     TestNotNull(TEXT("The active game mode is GridLootMaster"), GameMode);
     if (!GameMode || !GameMode->MapManagerComponent || !GameMode->CombatComponent) return false;
 
-    const int32 PreviousEncounterChance = GameMode->EncounterChancePercent;
     const ERaidState PreviousRaidState = GameMode->RaidState;
-    GameMode->EncounterChancePercent = 100;
     GameMode->RaidState = ERaidState::InRaid;
     GameMode->CombatComponent->ClearEnemy();
     GameMode->MapManagerComponent->InitializeMap();
@@ -1016,7 +1314,6 @@ bool FGridLootMasterCombatResumesMovementTest::RunTest(const FString& Parameters
     TestNotNull(TEXT("Minimap widget is created"), Minimap);
     if (!Minimap)
     {
-        GameMode->EncounterChancePercent = PreviousEncounterChance;
         GameMode->RaidState = PreviousRaidState;
         return false;
     }
@@ -1029,12 +1326,19 @@ bool FGridLootMasterCombatResumesMovementTest::RunTest(const FString& Parameters
     Minimap->OnAdvanceClicked();
     Minimap->OnAdvanceClicked();
     Minimap->OnAdvanceClicked();
-    TestTrue(TEXT("Moving onto the first tile starts combat"), GameMode->CombatComponent->bHasActiveEnemy);
+    TestFalse(TEXT("Moving onto the first tile does not create a random encounter"), GameMode->CombatComponent->bHasActiveEnemy);
     TestEqual(TEXT("The first tile is reached before combat"), Minimap->CurrentPlayerCoord, FIntPoint(1, 0));
     TestEqual(TEXT("The remaining route is preserved during combat"), Minimap->CurrentPath.Num(), 1);
 
+    FEnemyDefinition Enemy;
+    Enemy.EnemyID = TEXT("ExplicitCombatMovementEnemy");
+    Enemy.MaxHealth = 10;
+    GameMode->CombatComponent->SpawnEnemy(Enemy);
+    TestTrue(TEXT("An explicitly spawned enemy starts combat"), GameMode->CombatComponent->bHasActiveEnemy);
+    Minimap->OnAdvanceClicked();
+    TestEqual(TEXT("Movement remains locked during explicit combat"), Minimap->CurrentMoveProgress, 0);
+
     GameMode->CombatComponent->ClearEnemy();
-    GameMode->EncounterChancePercent = 0;
     Minimap->OnAdvanceClicked();
     Minimap->OnAdvanceClicked();
     Minimap->OnAdvanceClicked();
@@ -1044,7 +1348,6 @@ bool FGridLootMasterCombatResumesMovementTest::RunTest(const FString& Parameters
 
     Minimap->RemoveFromParent();
     GameMode->CombatComponent->ClearEnemy();
-    GameMode->EncounterChancePercent = PreviousEncounterChance;
     GameMode->RaidState = PreviousRaidState;
     return true;
 }
@@ -1076,9 +1379,7 @@ bool FGridLootMasterMinimapRejectsStaleBlockedStepTest::RunTest(const FString& P
     TestNotNull(TEXT("The active game mode is GridLootMaster"), GameMode);
     if (!GameMode || !GameMode->MapManagerComponent || !GameMode->CombatComponent) return false;
 
-    const int32 PreviousEncounterChance = GameMode->EncounterChancePercent;
     const ERaidState PreviousRaidState = GameMode->RaidState;
-    GameMode->EncounterChancePercent = 0;
     GameMode->RaidState = ERaidState::InRaid;
     GameMode->CombatComponent->ClearEnemy();
     GameMode->MapManagerComponent->InitializeMap();
@@ -1087,7 +1388,6 @@ bool FGridLootMasterMinimapRejectsStaleBlockedStepTest::RunTest(const FString& P
     TestNotNull(TEXT("Minimap widget is created for stale movement test"), Minimap);
     if (!Minimap)
     {
-        GameMode->EncounterChancePercent = PreviousEncounterChance;
         GameMode->RaidState = PreviousRaidState;
         return false;
     }
@@ -1108,7 +1408,6 @@ bool FGridLootMasterMinimapRejectsStaleBlockedStepTest::RunTest(const FString& P
 
     Minimap->RemoveFromParent();
     GameMode->CombatComponent->ClearEnemy();
-    GameMode->EncounterChancePercent = PreviousEncounterChance;
     GameMode->RaidState = PreviousRaidState;
     return true;
 }
@@ -1195,6 +1494,11 @@ bool FGridLootMasterBangHandlerTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("BANG handler applies weapon damage"), GameMode->CombatComponent->CurrentEnemy.CurrentHealth, 75);
     TestTrue(TEXT("Enemy remains active after non-lethal BANG"), GameMode->CombatComponent->bHasActiveEnemy);
 
+    UI->OnBangButtonClicked();
+    TestEqual(TEXT("Cooldown rejection does not consume ammo"), Magazine->CurrentAmmo, 1);
+    TestTrue(TEXT("Cooldown rejection is reported"),
+        GameMode->CombatComponent->LastCombatMessage.Contains(TEXT("준비되지 않았습니다")));
+
     GameMode->CombatComponent->ClearEnemy();
     Magazine->CurrentAmmo = 0;
     GameMode->CombatComponent->SpawnEnemy(Enemy);
@@ -1225,6 +1529,197 @@ bool FGridLootMasterBangHandlerTest::RunTest(const FString& Parameters)
     GameMode->RaidState = PreviousRaidState;
     GameMode->CurrentScore = PreviousScore;
     GameMode->QuotaScore = PreviousQuota;
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterCombatTimingTest,
+    "GridLootMaster.Combat.TimeBasedCombat",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterCombatTimingTest::RunTest(const FString& Parameters)
+{
+    UWorld* GameWorld = nullptr;
+    if (GEngine)
+    {
+        for (const FWorldContext& Context : GEngine->GetWorldContexts())
+        {
+            if (Context.World() && Context.World()->IsGameWorld())
+            {
+                GameWorld = Context.World();
+                break;
+            }
+        }
+    }
+
+    TestNotNull(TEXT("A game world is available for time-based combat"), GameWorld);
+    if (!GameWorld) return false;
+
+    AGridGameMode* GameMode = Cast<AGridGameMode>(GameWorld->GetAuthGameMode());
+    TestNotNull(TEXT("The active game mode is GridLootMaster"), GameMode);
+    if (!GameMode || !GameMode->CombatComponent) return false;
+
+    const ERaidState PreviousRaidState = GameMode->RaidState;
+    const int32 PreviousHealth = GameMode->CurrentHealth;
+    const int32 PreviousMaxHealth = GameMode->MaxHealth;
+    const float PreviousPlayerInterval = GameMode->CombatComponent->PlayerAttackIntervalSeconds;
+    const int32 PreviousPlayerAccuracy = GameMode->CombatComponent->PlayerAccuracyPercent;
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->MaxHealth = 100;
+    GameMode->CurrentHealth = 100;
+    GameMode->CombatComponent->PlayerAttackIntervalSeconds = 1.0f;
+    GameMode->CombatComponent->PlayerAccuracyPercent = 100;
+    GameMode->CombatComponent->ClearEnemy();
+
+    FEnemyDefinition Enemy;
+    Enemy.EnemyID = TEXT("TimingEnemy");
+    Enemy.DisplayName = TEXT("Timing Enemy");
+    Enemy.MaxHealth = 100;
+    Enemy.AttackDamage = 10;
+    Enemy.AccuracyPercent = 100;
+    Enemy.ReactionTimeSeconds = 0.5f;
+    Enemy.AttackIntervalSeconds = 1.0f;
+    GameMode->CombatComponent->SpawnEnemy(Enemy);
+
+    TestTrue(TEXT("Player attack is accepted when ready"),
+        GameMode->CombatComponent->RequestPlayerAttack(10));
+    TestEqual(TEXT("Accepted attack hits the enemy"), GameMode->CombatComponent->CurrentEnemy.CurrentHealth, 90);
+    TestEqual(TEXT("Player is not counterattacked immediately"), GameMode->CurrentHealth, 100);
+    TestFalse(TEXT("Rapid attack is rejected during player cooldown"),
+        GameMode->CombatComponent->RequestPlayerAttack(10));
+    TestEqual(TEXT("Cooldown rejection leaves enemy health unchanged"),
+        GameMode->CombatComponent->CurrentEnemy.CurrentHealth, 90);
+
+    GameMode->CombatComponent->AdvanceCombatTimeForTest(0.49f);
+    TestEqual(TEXT("Enemy waits through reaction time"), GameMode->CurrentHealth, 100);
+    GameMode->CombatComponent->AdvanceCombatTimeForTest(0.01f);
+    TestEqual(TEXT("Enemy attacks on its independent schedule"), GameMode->CurrentHealth, 90);
+    GameMode->CombatComponent->AdvanceCombatTimeForTest(1.0f);
+    TestEqual(TEXT("Enemy continues attacking by interval"), GameMode->CurrentHealth, 80);
+
+    GameMode->CombatComponent->ClearEnemy();
+    GameMode->CombatComponent->PlayerAttackIntervalSeconds = PreviousPlayerInterval;
+    GameMode->CombatComponent->PlayerAccuracyPercent = PreviousPlayerAccuracy;
+    GameMode->MaxHealth = PreviousMaxHealth;
+    GameMode->CurrentHealth = PreviousHealth;
+    GameMode->RaidState = PreviousRaidState;
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterCombatAcceptedMissTest,
+    "GridLootMaster.Combat.AcceptedMissConsumesAmmo",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterCombatAcceptedMissTest::RunTest(const FString& Parameters)
+{
+    UWorld* GameWorld = nullptr;
+    if (GEngine)
+    {
+        for (const FWorldContext& Context : GEngine->GetWorldContexts())
+        {
+            if (Context.World() && Context.World()->IsGameWorld())
+            {
+                GameWorld = Context.World();
+                break;
+            }
+        }
+    }
+
+    TestNotNull(TEXT("A game world is available for accepted miss"), GameWorld);
+    if (!GameWorld) return false;
+
+    AGridGameMode* GameMode = Cast<AGridGameMode>(GameWorld->GetAuthGameMode());
+    TestNotNull(TEXT("The active game mode is GridLootMaster"), GameMode);
+    if (!GameMode || !GameMode->CombatComponent) return false;
+
+    const ERaidState PreviousRaidState = GameMode->RaidState;
+    const int32 PreviousAccuracy = GameMode->CombatComponent->PlayerAccuracyPercent;
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->CombatComponent->PlayerAccuracyPercent = 0;
+    GameMode->CombatComponent->ClearEnemy();
+
+    FEnemyDefinition Enemy;
+    Enemy.EnemyID = TEXT("AcceptedMissEnemy");
+    Enemy.MaxHealth = 100;
+    GameMode->CombatComponent->SpawnEnemy(Enemy);
+
+    TestTrue(TEXT("An accepted miss still commits the attack"),
+        GameMode->CombatComponent->RequestPlayerAttack(10));
+    TestFalse(TEXT("Accepted miss does not damage the enemy"),
+        GameMode->CombatComponent->bLastPlayerAttackHit);
+    TestEqual(TEXT("Accepted miss leaves enemy health unchanged"),
+        GameMode->CombatComponent->CurrentEnemy.CurrentHealth, 100);
+
+    GameMode->CombatComponent->ClearEnemy();
+    GameMode->CombatComponent->PlayerAccuracyPercent = PreviousAccuracy;
+    GameMode->RaidState = PreviousRaidState;
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterCombatRangeTest,
+    "GridLootMaster.Combat.CombatRangeRejectsOutOfRangeAttack",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterCombatRangeTest::RunTest(const FString& Parameters)
+{
+    UWorld* GameWorld = nullptr;
+    if (GEngine)
+    {
+        for (const FWorldContext& Context : GEngine->GetWorldContexts())
+        {
+            if (Context.World() && Context.World()->IsGameWorld())
+            {
+                GameWorld = Context.World();
+                break;
+            }
+        }
+    }
+
+    TestNotNull(TEXT("A game world is available for combat range"), GameWorld);
+    if (!GameWorld) return false;
+
+    AGridGameMode* GameMode = Cast<AGridGameMode>(GameWorld->GetAuthGameMode());
+    TestNotNull(TEXT("The active game mode is GridLootMaster"), GameMode);
+    if (!GameMode || !GameMode->CombatComponent || !GameMode->EnemyManagerComponent || !GameMode->MapManagerComponent)
+    {
+        return false;
+    }
+
+    const ERaidState PreviousRaidState = GameMode->RaidState;
+    const FIntPoint PreviousPlayerCoord = GameMode->CurrentPlayerCoord;
+    const int32 PreviousCombatRange = GameMode->CombatComponent->CombatRangeTiles;
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->CurrentPlayerCoord = FIntPoint(0, 0);
+    GameMode->MapManagerComponent->InitializeMap();
+    GameMode->EnemyManagerComponent->InitialSpawnDelayTicks = 100;
+    GameMode->CombatComponent->ClearEnemy();
+    GameMode->EnemyManagerComponent->ResetForRaid();
+
+    FEnemyDefinition Enemy;
+    Enemy.EnemyID = TEXT("RangeEnemy");
+    Enemy.DisplayName = TEXT("Range Enemy");
+    Enemy.MaxHealth = 100;
+    Enemy.VisionRangeTiles = 2;
+    Enemy.DetectionPower = 100;
+    Enemy.ReactionTimeSeconds = 10.0f;
+    TestTrue(TEXT("Range test enemy is spawned in the world"),
+        GameMode->EnemyManagerComponent->SpawnEnemyAt(Enemy, FIntPoint(2, 0), EEnemyBehaviorProfile::GuardZone));
+    GameMode->EnemyManagerComponent->AdvanceWorldTick();
+    TestTrue(TEXT("Range test creates a combat contact"), GameMode->CombatComponent->bHasActiveEnemy);
+
+    GameMode->CombatComponent->CombatRangeTiles = 1;
+    TestFalse(TEXT("Player attack is rejected outside combat range"),
+        GameMode->CombatComponent->RequestPlayerAttack(10));
+    TestEqual(TEXT("Out-of-range attack does not damage the enemy"),
+        GameMode->CombatComponent->CurrentEnemy.CurrentHealth, 100);
+
+    GameMode->CombatComponent->ClearEnemy();
+    GameMode->EnemyManagerComponent->ResetForRaid();
+    GameMode->CombatComponent->CombatRangeTiles = PreviousCombatRange;
+    GameMode->CurrentPlayerCoord = PreviousPlayerCoord;
+    GameMode->RaidState = PreviousRaidState;
     return true;
 }
 
@@ -1319,9 +1814,7 @@ bool FGridLootMasterMinimapSharedMovementStateTest::RunTest(const FString& Param
     if (!GameMode || !GameMode->CombatComponent) return false;
 
     const ERaidState PreviousRaidState = GameMode->RaidState;
-    const int32 PreviousEncounterChance = GameMode->EncounterChancePercent;
     GameMode->RaidState = ERaidState::InRaid;
-    GameMode->EncounterChancePercent = 0;
     GameMode->CombatComponent->ClearEnemy();
 
     UMapManagerComponent* MapManager = NewObject<UMapManagerComponent>(GameWorld);
@@ -1332,7 +1825,6 @@ bool FGridLootMasterMinimapSharedMovementStateTest::RunTest(const FString& Param
     if (!MapManager || !FullMinimap || !CompactMinimap)
     {
         GameMode->RaidState = PreviousRaidState;
-        GameMode->EncounterChancePercent = PreviousEncounterChance;
         return false;
     }
 
@@ -1403,7 +1895,6 @@ bool FGridLootMasterMinimapSharedMovementStateTest::RunTest(const FString& Param
     FullMinimap->RemoveFromParent();
     CompactMinimap->RemoveFromParent();
     GameMode->RaidState = PreviousRaidState;
-    GameMode->EncounterChancePercent = PreviousEncounterChance;
     return true;
 }
 

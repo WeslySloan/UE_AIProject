@@ -22,6 +22,16 @@ UItemInstance::UItemInstance()
     MaxAmmo = 0;
     Damage = 0;
     Armor = 0;
+    WeaponAttackType = EWeaponAttackType::Firearm;
+    BaseAccuracyPercent = 100;
+    AttackIntervalSeconds = 1.0f;
+    OptimalRangeTiles = 1;
+    MaxRangeTiles = 3;
+    RecoilPerShot = 0.0f;
+    RecoilRecoveryPerSecond = 0.0f;
+    SwapTimeSeconds = 0.0f;
+    ReloadTimeSeconds = 0.0f;
+    NoiseRadiusTiles = 0;
     EquippedSight = nullptr;
     EquippedMuzzle = nullptr;
     EquippedMagazine = nullptr;
@@ -82,6 +92,19 @@ void UItemInstance::InitFromData(const FItemData& InData)
     MaxAmmo = FMath::Max(0, InData.MaxAmmo);
     Damage = InData.Damage;
     Armor = InData.Armor;
+    WeaponAttackType = InData.WeaponAttackType;
+    BaseAccuracyPercent = FMath::Clamp(InData.BaseAccuracyPercent, 0, 100);
+    if (BaseAccuracyPercent == 0) BaseAccuracyPercent = 100;
+    AttackIntervalSeconds = InData.AttackIntervalSeconds > 0.0f ? InData.AttackIntervalSeconds : 1.0f;
+    OptimalRangeTiles = FMath::Max(1, InData.OptimalRangeTiles);
+    MaxRangeTiles = InData.MaxRangeTiles > 0
+        ? FMath::Max(OptimalRangeTiles, InData.MaxRangeTiles)
+        : FMath::Max(OptimalRangeTiles, 3);
+    RecoilPerShot = FMath::Max(0.0f, InData.RecoilPerShot);
+    RecoilRecoveryPerSecond = FMath::Max(0.0f, InData.RecoilRecoveryPerSecond);
+    SwapTimeSeconds = FMath::Max(0.0f, InData.SwapTimeSeconds);
+    ReloadTimeSeconds = FMath::Max(0.0f, InData.ReloadTimeSeconds);
+    NoiseRadiusTiles = FMath::Max(0, InData.NoiseRadiusTiles);
     EquippedSight = nullptr;
     EquippedMuzzle = nullptr;
     EquippedMagazine = nullptr;

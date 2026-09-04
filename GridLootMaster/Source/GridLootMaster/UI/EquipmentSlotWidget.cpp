@@ -204,6 +204,11 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
     if (ItemDropOp->ItemObj->Category == EItemCategory::Attachment && EquippedItem && EquippedItem->Category == EItemCategory::Weapon)
     {
         EAttachmentType ModType = ItemDropOp->ItemObj->AttachmentType;
+        if (ModType == EAttachmentType::Magazine &&
+            !EquippedItem->IsCompatibleMagazine(ItemDropOp->ItemObj))
+        {
+            return false;
+        }
         const bool bSlotAvailable =
             (ModType == EAttachmentType::Sight && !EquippedItem->EquippedSight) ||
             (ModType == EAttachmentType::Muzzle && !EquippedItem->EquippedMuzzle) ||

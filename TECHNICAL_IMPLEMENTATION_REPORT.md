@@ -1,20 +1,22 @@
 # GridLootMaster 기술 구현 현황 보고서
 
-기준일: 2026-09-03  
+기준일: 2026-09-04
 엔진: Unreal Engine 5.7  
 프로젝트: `GridLootMaster`
 
 ## 1. 현황 요약
 
-현재 프로젝트는 **Phase 6 기본 기능 구현 완료, 안정화 및 실제 플레이 검증 진행 중**인 상태다.
+현재 프로젝트는 **Phase 6 기본 기능과 전투 개편 C1~C6를 완료하고, C7 부분 구현·C8 최소 골격·C9 플레이어 매복 골격을 검증했으며, C11 입력 보완과 실제 플레이 검증을 진행 중**인 상태다.
 
 진행률은 측정 기준을 분리해서 보는 것이 정확하다.
 
 | 기준 | 예상 진행률 | 설명 |
 |---|---:|---|
 | Phase 4~6 코드·자동화 구현 | 약 92% | 핵심 시스템·탈출지점 기본 규칙과 주요 오류 수정 완료 |
-| 최종 완료 기준 | 약 85~90% | 실제 UI 플레이·저장 재시작 검증이 남음 |
-| Phase 6 현재 상태 | 약 93% | 전투 백엔드·탈출지점·기본 HUD 확장 완료, 실제 화면 검증 잔여 |
+| 전투 개편 C1~C6 | 완료 | Random Encounter 제거, Enemy World, World Tick·Spawn Scheduler, RandomWander, LOS·탐지·Contact, 시간 기반 전투 구현·검증 완료 |
+| 전투 개편 C1~C11 | 약 70% | C1~C6 완료, C7 부분 구현, C8 최소 골격·C9 플레이어 매복 골격 완료, C11 재장전 입력 연결, C8/C9 UI 보완·C10 잔여 |
+| 최종 완료 기준 | 약 83~87% | C7 이후 전투 확장과 실제 UI 플레이·저장 재시작 검증이 남음 |
+| Phase 6 현재 상태 | 약 95% | 기본 전투·탈출지점·HUD 확장 및 C8/C9 Gameplay 골격 완료, C11 입력 일부 연결, DataTable·실제 화면 검증 잔여 |
 
 이 수치는 공식 엔진 지표가 아니라, 구현된 기능·테스트 범위·사용자 검증 잔여량을 바탕으로 한 공학적 추정치다.
 
@@ -26,7 +28,7 @@
   - 레이드 상태, 점수, 시간, HP 관리
   - 레이드 시작·추출·실패 처리
   - 스태쉬 저장/로드
-  - 이동 완료 후 전투 인카운터 생성
+  - 이동 완료 좌표와 Enemy World 상태를 연결하는 레이드 오케스트레이션
   - 메인 UI와 상태 이벤트 연결
 
 ### 2.2 인벤토리와 장비
@@ -93,7 +95,7 @@
 - 이동 중에는 경로 변경을 잠근다.
 - 실제 이동 직전에 벽 상태를 다시 확인해 오래된 경로가 막힌 타일로 이동하지 않도록 했다.
 - 인레이드가 아니거나 전투 중이면 타일 선택과 전진을 거부한다.
-- 이동 완료 후 설정된 확률로 적을 생성한다.
+- C1에서 `EncounterChancePercent` 확률 판정과 이동 완료 직후 즉석 적 생성을 제거했다.
 - 현재 목적지 알림의 `(X, Y)`는 0부터 시작하는 맵 열·행 좌표이며 클릭한 타일을 표시하는 값이다. 추후 플레이어용 구역명 표기로 개선할 수 있다.
 - 전투 컴포넌트에 적 HP, 공격력, 명중률, 방어력, 보상, 공격·반격·처치 상태를 구현했다.
 - `BANG!` 입력은 인레이드·활성 적·유효 무기·잔여 탄약을 확인한 뒤 발사한다.
@@ -102,14 +104,86 @@
 
 ### 3.5 후속 적 인카운터 기술 설계
 
-현재 구현은 이동 완료 후 확률 판정이다. 사용자가 제안한 확장 규칙은 다음 순서로 기술화한다.
+현재 구현은 이동 완료 시 랜덤 Encounter를 만들지 않는다. 사용자가 제안한 확장 규칙은 다음 순서로 기술화한다.
 
 1. `RaidTurn` 또는 레이드 경과 시간을 기록하고 일정 주기마다 스폰 판정을 실행한다.
 2. `MapManagerComponent`의 유효·비점유·비장애물 타일에서 랜덤 후보를 만들고, 현재 위치·탈출점·최소 거리 조건을 적용한다.
 3. 캐릭터의 탐색 능력과 타일 간 거리/벽 차단 여부를 사용해 감지 결과를 계산한다.
 4. 정확한 적 좌표 대신 존재·방향·위험도 단계의 알림을 먼저 노출하고, 전투 진입 때 실제 적을 공개한다.
 
-이 항목은 현재 요청에서 기획 기준으로만 확정했으며, 턴 스케줄러·탐지 스탯·적 위치 공개 규칙은 후속 구현 대상이다.
+이 항목은 C4~C5에서 단계적으로 구현했다. C1에서는 기존 확률 Encounter를 제거했고, C2에서는 Enemy World의 최소 데이터·점유 모델을 추가했으며, C3에서는 월드 Tick·Spawn Scheduler를 연결했다.
+
+### 3.6 Enemy World Model C2
+
+- `UEnemyManagerComponent`가 레이드 월드의 적 인스턴스 목록과 점유 좌표를 관리한다.
+- `FEnemyWorldInstance`에 고유 ID, 정의, 현재 좌표, 홈 좌표, 행동 프로필, 상태, 방향, 생존·공개 상태를 보관한다.
+- 유효하지 않은 좌표, `(9,9)` 같은 범위 밖 좌표, 플레이어 현재 타일, 이미 점유된 타일의 Spawn을 거부한다.
+- 동일한 `EnemyID`가 들어와도 인스턴스 ID는 결정적으로 유일하게 만든다.
+- 레이드 시작·성공 추출·실패 종료 시 Enemy World를 초기화한다.
+- C2에는 AI 이동, Spawn Scheduler, LOS·탐지·매복, 시간 기반 공격을 포함하지 않는다.
+
+### 3.7 Raid World Tick·Spawn Scheduler C3
+
+- 전진 입력이 성공하면 `UMinimapWidget`에서 `AGridGameMode::AdvanceRaidWorldTick()`으로 전달한다.
+- 전진 입력 1회당 `RaidWorldTick`이 1 증가하며, 전투 중·레이드 외부에서는 월드 Tick이 진행되지 않는다.
+- 초기 2 Tick은 안전 구간으로 두고, 이후 기본 3~5 Tick 간격으로 스폰을 판정한다.
+- Seed 기반 `FRandomStream`으로 후보 선택과 다음 스폰 간격을 재현 가능하게 만들었다.
+- 현재 플레이어 타일·탈출 타일·점유 타일·최소 거리 미충족·경로 불가 타일은 후보에서 제외한다.
+- 기본 생존 적 수는 3명으로 제한하며, 월드 적 Spawn은 C3에서 CombatComponent의 즉시 전투를 시작하지 않는다.
+
+### 3.8 Enemy Movement AI C4
+
+- `RandomWander` 적은 매 월드 Tick마다 현재 Tile의 4방향 이웃을 후보로 수집한다.
+- 맵 경계와 벽(`CanMoveBetween`)을 통과하지 않으며, 플레이어 타일과 다른 적 점유 타일을 후보에서 제외한다.
+- 이동에 성공하면 Enemy World 좌표, 점유 테이블, 바라보는 방향, `Wandering` 상태를 함께 갱신한다.
+- 이동 가능한 이웃이 없으면 현재 위치를 유지하고 다음 월드 Tick에 다시 시도한다.
+- C4에는 Patrol·GuardZone·LOS·탐지·Contact·전투 진입을 포함하지 않는다.
+
+### 3.9 LOS·탐지·Contact C5
+
+- `UMapManagerComponent::GetTileDistance()`는 유효 좌표 사이의 Chebyshev 거리를 반환하고, `HasLineOfSight()`는 벽과 대각선 코너 차단을 함께 검사한다.
+- `FEnemyDefinition`에 시야 범위·탐지력·은신 수치를 추가하고, `AGridGameMode`에 플레이어 Perception·Stealth·탐지 범위·탐지력을 보관한다.
+- Enemy World 인스턴스의 지식 상태를 `Hidden`·`Suspected`·`Revealed`로 구분한다. 플레이어의 의심만으로는 정확한 적 좌표를 공개하지 않는다.
+- 적이 유효 거리·LOS·탐지 점수 조건을 만족하면 해당 Enemy ID를 기준으로 CombatComponent에 Contact를 생성하고, 월드 인스턴스를 `InCombat`·`Revealed`로 전환한다.
+- Contact가 시작된 뒤에는 GameMode의 월드 Tick이 진행되지 않으며, 전투가 종료되면 활성 Contact ID를 해제한다.
+- C5는 전투 피해·시간 기반 공격·매복·전투 UI 확장을 포함하지 않는다.
+
+### 3.10 시간 기반 전투 C6
+
+- `UCombatComponent`에 플레이어 공격 쿨다운과 적 독립 공격 쿨다운을 추가했다.
+- `RequestPlayerAttack()`은 레이드·활성 적·쿨다운·사거리·LOS를 검증한 뒤 공격을 승인하며, 거부된 요청은 탄약을 소비하지 않는다.
+- 승인된 발사는 명중 여부와 관계없이 호출부가 탄약을 1발 소비하고, 플레이어 공격 후 즉시 강제 반격하지 않는다.
+- 적은 Contact 시 `ReactionTimeSeconds` 이후 독립적으로 공격하고, `AttackIntervalSeconds`에 따라 다음 공격을 예약한다.
+- C6 프로토타입의 기본 Combat Range는 3 Tile이며, 무기별 공격 간격·사거리·반동·정밀 수치는 C7에서 데이터화한다.
+- 월드 Contact 적이 처치되면 Enemy World 인스턴스를 `Dead`로 전환하고 점유 타일을 해제한다.
+
+### 3.11 무기 전투 스탯 C7 부분 구현
+
+- `EWeaponAttackType`과 `FItemData`의 무기 스탯 필드(`BaseAccuracyPercent`, `AttackIntervalSeconds`, `OptimalRangeTiles`, `MaxRangeTiles`, `RecoilPerShot`, `RecoilRecoveryPerSecond`, `SwapTimeSeconds`, `ReloadTimeSeconds`, `NoiseRadiusTiles`)를 추가했다.
+- `UItemInstance::InitFromData()`가 새 필드를 런타임 인스턴스로 복사하고, 기존 DataTable 행에는 안전 기본값을 적용한다.
+- `UMainGameUI::OnBangButtonClicked()`는 무기 공격 타입에 따라 Firearm만 탄창·탄약을 검사하며, 무기별 명중률·공격 간격·최대 사거리를 `RequestPlayerAttack()`에 전달한다.
+- 현재 프로젝트에는 아이템 전투 스탯 원본 CSV가 없고 `DT_ItemData.uasset`만 있으므로, 실제 무기별 밸런스 수치의 DataTable 재임포트는 완료로 표시하지 않는다.
+- `RecoilPerShot` 누적과 `RecoilRecoveryPerSecond` 기반 시간 회복을 `RequestPlayerAttack()` 및 Combat 시간 진행에 연결했으며, 반동에 따른 명중률 감소를 자동화 테스트로 확인했다.
+
+### 3.12 무기 교체·재장전 C8 최소 골격
+
+- `UCombatComponent`에 `None`·`Swapping`·`Reloading` 플레이어 행동 상태와 남은 시간을 추가했다.
+- 비전투 무기 교체는 즉시 완료하고, 전투 중에는 대상 무기의 `SwapTimeSeconds`만큼 지연한 뒤 완료 시점에 `ActiveWeaponSlot`을 변경한다. 교체 중에는 공격 요청을 거부한다.
+- 재장전은 현재 활성 Firearm과 장착 탄창, `Magazine->CompatibleAmmo`에 맞는 Inventory 탄약을 먼저 검증한 뒤 지연 행동을 시작한다.
+- 재장전 완료 시점에만 탄창 용량만큼 탄약을 커밋하며, 탄약 부족·대상 변경·수납 상태 변경 시 부분 커밋 없이 취소한다. 기존 탄창 삽입·언로드 UI 경로는 보존한다.
+- UI의 `1/2` 입력은 전투 중 UI 슬롯을 먼저 바꾸지 않고 `RequestWeaponSwap()`을 호출하며, Combat 완료 이벤트 이후 확정된 활성 슬롯을 화면에 반영한다.
+- UI의 `R` 입력은 `RequestReload()`를 호출하며, 재장전 검증 실패 시 상단 알림을 표시한다. 재장전 상태·남은 시간의 시각화는 아직 연결하지 않았다.
+- C8 자동화 테스트로 비전투 즉시 교체, 전투 중 교체 지연, 교체 중 공격 거부, 재장전 지연, 탄창 용량 제한, 탄약 소진·Inventory 제거를 확인했다.
+- 재장전 진행률 표시와 실제 무기별 Swap/Reload DataTable 수치는 C11 UI 확장 및 C7 아이템 CSV 확보 이후 보완한다.
+
+### 3.13 플레이어 매복 C9 최소 골격
+
+- `AGridGameMode`에 `Normal`·`Ambushing` 플레이어 자세와 `AMBUSH`, `WAIT`, `LET PASS`, `ASSAULT` 요청 API를 추가했다.
+- 매복은 레이드 중·비전투·이동 진행 중이 아닐 때만 시작되며, 시작과 대기는 각각 Enemy World Tick을 1회 소비한다.
+- 플레이어가 의심한 적만 매복 습격 대상으로 선택할 수 있으며, 습격 시 Enemy World 인스턴스를 Combat에 연결하고 플레이어 선제권을 부여한다.
+- 적이 매복 중인 플레이어를 먼저 탐지하면 자세를 `Normal`로 되돌리고 기존 Normal Contact로 전환한다.
+- `PlayerAmbushFlow`와 `PlayerAmbushDetectionBreaks` 테스트로 외부/전투 중 거부, Tick 진행, 의심 대상 습격, `LET PASS`, 선제권, 탐지에 의한 매복 해제를 확인했다.
+- 매복 버튼·대상 접근 알림·`LET PASS/ASSAULT` UI는 C11에서 연결하며, 적 매복 반응(`SEARCH/COVER/FLEE`)은 C10에서 구현한다.
 
 ## 4. 현재 UI 구현 상태
 
@@ -171,7 +245,8 @@
 - 자동화 테스트에 로비·인레이드·종료 상태의 버튼 상태와 패널 닫힘 검증 추가
 - Unreal Development Editor 빌드 성공
 - `GridLootMaster.Combat.ActionButtonsReflectRaidState` 단일 테스트 성공
-- 전체 `GridLootMaster` 자동화 테스트 68개 큐 실행 성공
+- 전체 `GridLootMaster` 자동화 테스트 83개 큐 실행·83개 통과
+- Enemy World Spawn·레이드 생명주기·World Tick/Spawn Scheduler·RandomWander·LOS/탐지/Contact 자동화 테스트 6개, 시간 기반 Combat 테스트 3개, Item Combat Stats 매핑·Recoil 테스트 2개 통과
 - GameMode의 기본 저장 슬롯은 기존 `GridLootMaster_Stash`를 유지하고, 자동화 테스트는 GUID 기반 임시 슬롯을 주입하도록 분리했다. 따라서 사용자 저장 슬롯을 덮어쓰지 않으면서 Stash 저장·로드·추출·실패 및 레이드 시작 테스트를 실제 실행한다.
 
 ## 6. 탈출지점 구현 현황
@@ -201,7 +276,7 @@
 
 ### 7.1 자동화 테스트
 
-최신 확인 기준 전체 `GridLootMaster` 자동화 테스트는 **68개 큐 실행·68개 통과**했다. GameMode의 기본 사용자 저장 슬롯은 유지하고, 저장을 수행하는 테스트는 GUID 기반 임시 슬롯을 사용해 사용자 데이터를 건드리지 않는다. 로비에서 Stash가 변경되면 자동 저장되며, 자동 저장 회귀 테스트도 포함한다. 주요 검증 범위는 다음과 같다.
+최신 확인 기준 전체 `GridLootMaster` 자동화 테스트는 **81개 큐 실행·81개 통과**했다. GameMode의 기본 사용자 저장 슬롯은 유지하고, 저장을 수행하는 테스트는 GUID 기반 임시 슬롯을 사용해 사용자 데이터를 건드리지 않는다. 로비에서 Stash가 변경되면 자동 저장되며, 자동 저장 회귀 테스트도 포함한다. 주요 검증 범위는 다음과 같다.
 
 - 인벤토리 배치·회전·스택 병합·분할
 - 출처/대상 수납 실패 롤백
@@ -229,6 +304,10 @@
 - Stash 화면의 전역 토글 숨김 및 레이드 진입 후 복원
 - 전투·이동·레이드 결과 이벤트를 2.5초 순차 알림 큐로 표시
 - 적 생성·공격·반격·처치·UI 상태
+- 타일 거리·벽/코너 LOS 차단·Hidden/Suspected/Revealed·Enemy ID Contact·전투 중 월드 Tick 정지
+- 플레이어 공격 쿨다운·적 독립 반격·Reaction Time·사거리/LOS 거부·승인된 빗나감 탄약 소비
+- ItemData 전투 스탯의 ItemInstance 복사와 구 DataTable 행 안전 기본값
+- 반동 누적에 따른 명중률 저하와 시간 기반 반동 회복
 - 레이드 시작·타이머·사망·추출·스태쉬 저장/로드
 - malformed stash grid와 손상 데이터 방어
 
@@ -265,16 +344,19 @@ Exit the editor and game, or press Ctrl+Alt+F11 if iterating on code in the edit
 
 ## 8. 남은 작업 우선순위
 
-1. 실제 Editor에서 큰 맵·하단 미니맵 타일 클릭과 전진 버튼 수동 검증
-2. Chest Rig `128x64`·Backpack `128x192` 장비 슬롯 및 탈출 후 로비 Stash 로드아웃 실제 화면 검증
-3. 전투·탐색·탈출·사망·시간초과를 포함한 전체 레이드 수동 검증
-4. 아이콘 에셋 준비 후 아이콘 경로 검증
-5. 특수 탈출구 규칙(가방·비용·고정 방향) 설계 및 구현
-6. 최종 코드리뷰, 계획서·보고서 갱신, 남은 제한사항 확정
+1. C7 아이템 전투 스탯 CSV 확보 후 DataTable 재임포트·무기별 수치 검증
+2. 실제 Editor에서 큰 맵·하단 미니맵 타일 클릭과 전진 버튼 수동 검증
+3. Chest Rig `128x64`·Backpack `128x192` 장비 슬롯 및 탈출 후 로비 Stash 로드아웃 실제 화면 검증
+4. 전투·탐색·탈출·사망·시간초과를 포함한 전체 레이드 수동 검증
+5. 아이콘 에셋 준비 후 아이콘 경로 검증
+6. 특수 탈출구 규칙(가방·비용·고정 방향) 설계 및 구현
+7. C8 재장전 진행률 UI 및 C9 매복 버튼·접근 알림 보완
+8. C10 적 매복 반응 구현
+9. 최종 코드리뷰, 계획서·보고서 갱신, 남은 제한사항 확정
 
 ### 8.1 레이드 종료 화면 전환 보완
 
-레이드 종료 이벤트 후 큰 미니맵이 계속 남아 이동 불가 상태가 무반응처럼 보이던 흐름을 수정했다. 종료 이벤트가 발생하면 큰 미니맵은 인벤토리 화면으로 자동 복귀하고, 하단 축소 미니맵은 숨긴다. 성공·실패 모두 결과를 표시한 뒤 `Lobby`에서 다음 출격을 준비할 수 있다. `ActionButtonsReflectRaidState`와 `TerminalRaidClearsMovementState` 및 전체 68개 자동화 테스트가 통과했다.
+레이드 종료 이벤트 후 큰 미니맵이 계속 남아 이동 불가 상태가 무반응처럼 보이던 흐름을 수정했다. 종료 이벤트가 발생하면 큰 미니맵은 인벤토리 화면으로 자동 복귀하고, 하단 축소 미니맵은 숨긴다. 성공·실패 모두 결과를 표시한 뒤 `Lobby`에서 다음 출격을 준비할 수 있다. `ActionButtonsReflectRaidState`와 `TerminalRaidClearsMovementState` 및 전체 72개 자동화 테스트가 통과했다.
 
 ## 9. 예상 소요 시간
 
@@ -282,7 +364,8 @@ Exit the editor and game, or press Ctrl+Alt+F11 if iterating on code in the edit
 
 | 작업 | 예상 시간 |
 |---|---:|
-| 최신 수정 컴파일 및 테스트 | 완료(약 1시간) |
+| C1~C2 컴파일 및 테스트 | 완료(약 40분) |
+| C3 월드 Tick·Spawn Scheduler | 완료(약 40분) |
 | 백팩 장비 슬롯 128x192 실제 화면 확인 | 10~20분 |
 | 하단 미니맵·전진 상태 공유 | 완료(약 1시간) |
 | 상단 알림 영역과 기본 이벤트 연결 | 완료(약 30분) |

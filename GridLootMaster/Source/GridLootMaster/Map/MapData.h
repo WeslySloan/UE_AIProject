@@ -65,6 +65,10 @@ struct FTileData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Map Data")
     bool bIsExplored;
 
+    // Map v1 정적 데이터: 일반 Enemy Spawn Candidate 허용 여부
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Map Data|Enemy Spawn")
+    bool bEnemySpawnAllowed;
+
     FTileData()
         : Coordinate(FIntPoint(0, 0))
         , Zone(ETileZone::Zone_A)
@@ -74,5 +78,6 @@ struct FTileData
         , bOpenEast(true)
         , bOpenWest(true)
         , bIsExplored(false)
+        , bEnemySpawnAllowed(true)
     {}
 };

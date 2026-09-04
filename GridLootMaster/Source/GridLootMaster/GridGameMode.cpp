@@ -11,6 +11,7 @@
 #include "UI/MinimapWidget.h"
 #include "StashSaveGame.h"
 #include "CombatComponent.h"
+#include "EnemyManagerComponent.h"
 
 namespace
 {
@@ -73,6 +74,7 @@ AGridGameMode::AGridGameMode()
     StashComponent = CreateDefaultSubobject<UGridInventoryComponent>(TEXT("StashComponent"));
     EquipmentComponent = CreateDefaultSubobject<UEquipmentComponent>(TEXT("EquipmentComponent"));
     CombatComponent = CreateDefaultSubobject<UCombatComponent>(TEXT("CombatComponent"));
+    EnemyManagerComponent = CreateDefaultSubobject<UEnemyManagerComponent>(TEXT("EnemyManagerComponent"));
     MapManagerComponent = CreateDefaultSubobject<UMapManagerComponent>(TEXT("MapManagerComponent"));
     RaidState = ERaidState::Lobby;
     TotalTimeLimit = 60.0f;
@@ -229,22 +231,83 @@ void AGridGameMode::HandlePlayerMoved(FIntPoint NewCoordinate)
     }
 
     CurrentPlayerCoord = NewCoordinate;
+}
 
-    const int32 Chance = FMath::Clamp(EncounterChancePercent, 0, 100);
-    if (FMath::RandRange(1, 100) > Chance)
+void AGridGameMode::AdvanceRaidWorldTick()
+{
+    if (RaidState != ERaidState::InRaid ||
+        (CombatComponent && CombatComponent->bHasActiveEnemy) ||
+        !EnemyManagerComponent)
     {
         return;
     }
 
-    FEnemyDefinition EncounterEnemy;
-    EncounterEnemy.EnemyID = FName(*FString::Printf(TEXT("Scav_%d_%d"), NewCoordinate.X, NewCoordinate.Y));
-    EncounterEnemy.DisplayName = TEXT("Scavenger");
-    EncounterEnemy.MaxHealth = 100;
-    EncounterEnemy.AttackDamage = 10;
-    EncounterEnemy.AccuracyPercent = 75;
-    EncounterEnemy.Armor = 0;
-    EncounterEnemy.Reward = 100;
-    CombatComponent->SpawnEnemy(EncounterEnemy);
+    EnemyManagerComponent->AdvanceWorldTick();
+}
+
+bool AGridGameMode::RequestPlayerAmbush()
+{
+    if (RaidState != ERaidState::InRaid || !EnemyManagerComponent || !CombatComponent ||
+        CombatComponent->bHasActiveEnemy || PlayerPosture == EPlayerRaidPosture::Ambushing)
+    {
+        return false;
+    }
+
+    if (MainUI && MainUI->MinimapUI && MainUI->MinimapUI->CurrentMoveProgress > 0)
+    {
+        return false;
+    }
+
+    PlayerPosture = EPlayerRaidPosture::Ambushing;
+    OnGameStateChanged.Broadcast();
+    AdvanceRaidWorldTick();
+    return true;
+}
+
+bool AGridGameMode::RequestAmbushWait()
+{
+    if (RaidState != ERaidState::InRaid || PlayerPosture != EPlayerRaidPosture::Ambushing ||
+        !CombatComponent || CombatComponent->bHasActiveEnemy)
+    {
+        return false;
+    }
+
+    AdvanceRaidWorldTick();
+    return true;
+}
+
+bool AGridGameMode::RequestAmbushLetPass()
+{
+    if (RaidState != ERaidState::InRaid || PlayerPosture != EPlayerRaidPosture::Ambushing ||
+        !CombatComponent || CombatComponent->bHasActiveEnemy)
+    {
+        return false;
+    }
+
+    PlayerPosture = EPlayerRaidPosture::Normal;
+    OnGameStateChanged.Broadcast();
+    AdvanceRaidWorldTick();
+    return true;
+}
+
+bool AGridGameMode::RequestAmbushAssault()
+{
+    if (RaidState != ERaidState::InRaid || PlayerPosture != EPlayerRaidPosture::Ambushing ||
+        !CombatComponent || CombatComponent->bHasActiveEnemy || !EnemyManagerComponent)
+    {
+        return false;
+    }
+
+    FName TargetInstanceID = NAME_None;
+    if (!EnemyManagerComponent->FindPlayerAmbushTarget(TargetInstanceID) ||
+        !EnemyManagerComponent->StartPlayerAmbushContact(TargetInstanceID))
+    {
+        return false;
+    }
+
+    PlayerPosture = EPlayerRaidPosture::Normal;
+    OnGameStateChanged.Broadcast();
+    return true;
 }
 
 void AGridGameMode::StartContainerSearch()
@@ -540,6 +603,7 @@ bool AGridGameMode::StartRaid()
         CombatComponent->ClearEnemy();
         CombatComponent->LastCombatMessage.Empty();
     }
+    if (EnemyManagerComponent) EnemyManagerComponent->ResetForRaid();
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().ClearTimer(SearchPhaseTimer);
@@ -550,6 +614,17 @@ bool AGridGameMode::StartRaid()
     CurrentScore = 0;
     RemainingTime = TotalTimeLimit;
     CurrentHealth = MaxHealth;
+    PlayerPosture = EPlayerRaidPosture::Normal;
+#if WITH_DEV_AUTOMATION_TESTS
+    if (bHasForcedRaidStartPointForTest)
+    {
+        MapManagerComponent->SpawnPoint = ForcedRaidStartPointForTest;
+    }
+    else
+#endif
+    {
+        MapManagerComponent->SpawnPoint = FMath::RandBool() ? FIntPoint(0, 0) : FIntPoint(8, 8);
+    }
     MapManagerComponent->InitializeMap();
     CurrentPlayerCoord = MapManagerComponent->SpawnPoint;
     if (MainUI)
@@ -834,6 +909,7 @@ bool AGridGameMode::ExtractRaid()
     // 추출은 레이드 종료만 처리합니다. 장비/휴대품은 플레이어가 Stash에서 직접 정리할 때까지 유지합니다.
     if (LootContainerComponent) LootContainerComponent->ClearInventory();
     if (CombatComponent) CombatComponent->ClearEnemy();
+    if (EnemyManagerComponent) EnemyManagerComponent->ResetForRaid();
     if (MainUI && MainUI->MinimapUI) MainUI->MinimapUI->ResetMovement();
 
     if (UWorld* World = GetWorld())
@@ -884,6 +960,7 @@ void AGridGameMode::FailRaid()
         }
     }
     if (CombatComponent) CombatComponent->ClearEnemy();
+    if (EnemyManagerComponent) EnemyManagerComponent->ResetForRaid();
     if (MainUI && MainUI->MinimapUI) MainUI->MinimapUI->ResetMovement();
 
     if (UWorld* World = GetWorld())
@@ -926,6 +1003,14 @@ void AGridGameMode::ApplyPlayerDamage(int32 DamageAmount)
         FailRaid();
     }
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+void AGridGameMode::SetRaidStartPointForTest(FIntPoint StartPoint)
+{
+    bHasForcedRaidStartPointForTest = StartPoint == FIntPoint(0, 0) || StartPoint == FIntPoint(8, 8);
+    ForcedRaidStartPointForTest = StartPoint;
+}
+#endif
 
 void AGridGameMode::CheckWinCondition()
 {

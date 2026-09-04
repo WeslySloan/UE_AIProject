@@ -9,7 +9,7 @@ UMapManagerComponent::UMapManagerComponent()
     MapHeight = 9;
     SpawnPoint = FIntPoint(0, 0);
     ExtractionPointCount = 1;
-    ExtractionMinDistance = 5;
+    ExtractionMinDistance = 14;
 }
 
 void UMapManagerComponent::BeginPlay()
@@ -35,8 +35,8 @@ ETileZone UMapManagerComponent::DetermineZone(int32 X, int32 Y) const
 
 void UMapManagerComponent::InitializeMap()
 {
-	MapWidth = FMath::Clamp(MapWidth, 1, 9);
-	MapHeight = FMath::Clamp(MapHeight, 1, 9);
+	MapWidth = 9;
+	MapHeight = 9;
 	SpawnPoint.X = FMath::Clamp(SpawnPoint.X, 0, MapWidth - 1);
 	SpawnPoint.Y = FMath::Clamp(SpawnPoint.Y, 0, MapHeight - 1);
 	ExtractionPoints.Empty();
@@ -53,6 +53,7 @@ void UMapManagerComponent::InitializeMap()
             MapGrid[Index].Zone = DetermineZone(X, Y);
             MapGrid[Index].TileType = ETileType::Normal;
             MapGrid[Index].bIsExplored = false;
+            MapGrid[Index].bEnemySpawnAllowed = true;
 
             // 맵 경계선 처리
             MapGrid[Index].bOpenNorth = (Y > 0);
@@ -62,8 +63,6 @@ void UMapManagerComponent::InitializeMap()
         }
     }
 
-    // [테스트용] 몇 개의 벽을 막아 봅니다 (고정된 맵 템플릿의 시작)
-    // 예: (1,1)의 오른쪽과 (2,1)의 왼쪽을 막는다
     auto CloseEdge = [&](int32 X1, int32 Y1, int32 X2, int32 Y2) {
         int32 Idx1 = GetIndex(X1, Y1);
         int32 Idx2 = GetIndex(X2, Y2);
@@ -75,10 +74,47 @@ void UMapManagerComponent::InitializeMap()
         else if (Y1 > Y2) { MapGrid[Idx1].bOpenNorth = false; MapGrid[Idx2].bOpenSouth = false; }
     };
 
-    // 간단한 미로처럼 몇 군데 벽 생성
-    CloseEdge(2, 0, 3, 0); CloseEdge(2, 1, 3, 1); CloseEdge(2, 2, 3, 2); // Zone A와 B 사이 막음
-    CloseEdge(1, 2, 1, 3); CloseEdge(2, 2, 2, 3); // Zone A와 D 사이 막음 (통로 하나만 놔둠)
-    CloseEdge(5, 5, 6, 5); CloseEdge(5, 6, 6, 6);
+    // GridLootMaster Map v1 ClosedEdges
+    const FIntPoint ClosedEdges[][2] = {
+        {{1,0},{1,1}}, {{2,0},{3,0}}, {{4,0},{4,1}}, {{5,0},{6,0}}, {{7,0},{7,1}},
+        {{0,1},{1,1}}, {{3,1},{4,1}}, {{6,1},{7,1}}, {{0,2},{0,3}}, {{2,2},{3,2}},
+        {{2,2},{2,3}}, {{5,2},{6,2}}, {{6,2},{6,3}}, {{8,2},{8,3}}, {{1,3},{1,4}},
+        {{3,3},{4,3}}, {{5,3},{5,4}}, {{0,4},{1,4}}, {{3,4},{4,4}}, {{3,4},{3,5}},
+        {{4,4},{5,4}}, {{7,4},{8,4}}, {{7,4},{7,5}}, {{0,5},{0,6}}, {{2,5},{2,6}},
+        {{4,5},{5,5}}, {{6,5},{6,6}}, {{8,5},{8,6}}, {{2,6},{3,6}}, {{5,6},{6,6}},
+        {{1,7},{2,7}}, {{1,7},{1,8}}, {{4,7},{5,7}}, {{4,7},{4,8}}, {{7,7},{8,7}},
+        {{7,7},{7,8}}, {{2,8},{3,8}}, {{5,8},{6,8}}
+    };
+    for (const auto& Edge : ClosedEdges)
+    {
+        CloseEdge(Edge[0].X, Edge[0].Y, Edge[1].X, Edge[1].Y);
+    }
+
+    // MapTiles v1의 정적 일반 Enemy Spawn 금지 타일
+    const FIntPoint EnemySpawnForbiddenTiles[] = {
+        {0,0}, {0,1}, {0,2}, {3,3}, {5,3}, {3,5}, {5,5}, {4,4},
+        {7,7}, {8,6}, {8,7}, {8,8}
+    };
+    for (const FIntPoint Coordinate : EnemySpawnForbiddenTiles)
+    {
+        const int32 Index = GetIndex(Coordinate.X, Coordinate.Y);
+        if (MapGrid.IsValidIndex(Index))
+        {
+            MapGrid[Index].bEnemySpawnAllowed = false;
+        }
+    }
+
+    const FIntPoint DeadEndTiles[] = {
+        {3,3}, {5,3}, {3,5}, {5,5}
+    };
+    for (const FIntPoint Coordinate : DeadEndTiles)
+    {
+        const int32 Index = GetIndex(Coordinate.X, Coordinate.Y);
+        if (MapGrid.IsValidIndex(Index))
+        {
+            MapGrid[Index].TileType = ETileType::DeadEnd;
+        }
+    }
 
     GenerateExtractionPoints();
 }
@@ -102,36 +138,19 @@ bool UMapManagerComponent::IsExtractionPoint(FIntPoint Coordinate) const
 void UMapManagerComponent::GenerateExtractionPoints()
 {
     TArray<FIntPoint> Candidates;
-    const int32 CenterX = MapWidth / 2;
-    const int32 CenterY = MapHeight / 2;
-    const bool bSpawnOnWest = SpawnPoint.X < CenterX;
-    const bool bSpawnOnEast = SpawnPoint.X > CenterX;
-    const bool bSpawnOnNorth = SpawnPoint.Y < CenterY;
     const int32 MinDistance = FMath::Max(0, ExtractionMinDistance);
 
-    if (bSpawnOnWest || (!bSpawnOnEast && bSpawnOnNorth))
+    if (SpawnPoint == FIntPoint(0, 0))
     {
-        const int32 ExtractionX = MapWidth - 1;
-        for (int32 Y = 0; Y < MapHeight; ++Y)
-        {
-            Candidates.Add(FIntPoint(ExtractionX, Y));
-        }
+        Candidates.Add(FIntPoint(8, 6));
+        Candidates.Add(FIntPoint(8, 7));
+        Candidates.Add(FIntPoint(8, 8));
     }
-    else if (bSpawnOnEast)
+    else if (SpawnPoint == FIntPoint(8, 8))
     {
-        const int32 ExtractionX = 0;
-        for (int32 Y = 0; Y < MapHeight; ++Y)
-        {
-            Candidates.Add(FIntPoint(ExtractionX, Y));
-        }
-    }
-    else
-    {
-        const int32 ExtractionY = SpawnPoint.Y < CenterY ? MapHeight - 1 : 0;
-        for (int32 X = 0; X < MapWidth; ++X)
-        {
-            Candidates.Add(FIntPoint(X, ExtractionY));
-        }
+        Candidates.Add(FIntPoint(0, 0));
+        Candidates.Add(FIntPoint(0, 1));
+        Candidates.Add(FIntPoint(0, 2));
     }
 
     for (int32 Index = Candidates.Num() - 1; Index > 0; --Index)
@@ -187,6 +206,74 @@ bool UMapManagerComponent::CanMoveBetween(FIntPoint From, FIntPoint To) const
     if (To.Y == From.Y - 1 && To.X == From.X) return FromTile.bOpenNorth && ToTile.bOpenSouth;
 
     return false; // 대각선이나 멀리 떨어진 경우
+}
+
+int32 UMapManagerComponent::GetTileDistance(FIntPoint From, FIntPoint To) const
+{
+    if (GetIndex(From.X, From.Y) == -1 || GetIndex(To.X, To.Y) == -1)
+    {
+        return MAX_int32;
+    }
+
+    return FMath::Max(FMath::Abs(From.X - To.X), FMath::Abs(From.Y - To.Y));
+}
+
+bool UMapManagerComponent::HasLineOfSight(FIntPoint From, FIntPoint To) const
+{
+    if (GetIndex(From.X, From.Y) == -1 || GetIndex(To.X, To.Y) == -1)
+    {
+        return false;
+    }
+
+    if (From == To)
+    {
+        return true;
+    }
+
+    int32 X = From.X;
+    int32 Y = From.Y;
+    const int32 DeltaX = FMath::Abs(To.X - From.X);
+    const int32 DeltaY = FMath::Abs(To.Y - From.Y);
+    const int32 StepX = From.X < To.X ? 1 : -1;
+    const int32 StepY = From.Y < To.Y ? 1 : -1;
+    int32 Error = DeltaX - DeltaY;
+
+    while (X != To.X || Y != To.Y)
+    {
+        const int32 PreviousX = X;
+        const int32 PreviousY = Y;
+        const int32 DoubleError = Error * 2;
+        const bool bStepX = DoubleError > -DeltaY;
+        const bool bStepY = DoubleError < DeltaX;
+        if (bStepX)
+        {
+            Error -= DeltaY;
+            X += StepX;
+        }
+        if (bStepY)
+        {
+            Error += DeltaX;
+            Y += StepY;
+        }
+
+        const FIntPoint Previous(PreviousX, PreviousY);
+        const FIntPoint Next(X, Y);
+        if (bStepX && bStepY)
+        {
+            const FIntPoint Horizontal(X, PreviousY);
+            const FIntPoint Vertical(PreviousX, Y);
+            if (!CanMoveBetween(Previous, Horizontal) || !CanMoveBetween(Previous, Vertical))
+            {
+                return false;
+            }
+        }
+        else if (!CanMoveBetween(Previous, Next))
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 struct FAStarNode
