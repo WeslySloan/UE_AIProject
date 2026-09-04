@@ -206,6 +206,47 @@ bool FGridLootMasterEnemyWorldTickSpawnSchedulerTest::RunTest(const FString& Par
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterEnemyWorldDebugSpawnTest,
+    "GridLootMaster.EnemyWorld.DebugSpawnUsesValidRaidTile",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterEnemyWorldDebugSpawnTest::RunTest(const FString& Parameters)
+{
+    AGridGameMode* GameMode = NewObject<AGridGameMode>();
+    TestNotNull(TEXT("Game mode is created for debug spawn"), GameMode);
+    if (!GameMode || !GameMode->EnemyManagerComponent || !GameMode->MapManagerComponent)
+    {
+        return false;
+    }
+
+    GameMode->MapManagerComponent->InitializeMap();
+    GameMode->CurrentPlayerCoord = FIntPoint(0, 0);
+    GameMode->RaidState = ERaidState::Lobby;
+    GameMode->EnemyManagerComponent->ResetForRaid();
+    TestFalse(TEXT("Debug spawn is rejected outside a raid"),
+        GameMode->EnemyManagerComponent->DebugSpawnNearestScav());
+
+    GameMode->RaidState = ERaidState::InRaid;
+    TestTrue(TEXT("Debug spawn creates a real World Enemy instance in a raid"),
+        GameMode->EnemyManagerComponent->DebugSpawnNearestScav());
+    TestEqual(TEXT("Debug spawn creates exactly one alive enemy"),
+        GameMode->EnemyManagerComponent->GetAliveEnemyCount(), 1);
+    if (GameMode->EnemyManagerComponent->GetEnemyInstances().Num() == 1)
+    {
+        const FEnemyWorldInstance& Enemy = GameMode->EnemyManagerComponent->GetEnemyInstances()[0];
+        FTileData TileData;
+        TestNotEqual(TEXT("Debug enemy is not on the player tile"), Enemy.Coordinate, GameMode->CurrentPlayerCoord);
+        TestTrue(TEXT("Debug enemy uses an allowed spawn tile"),
+            GameMode->MapManagerComponent->GetTileData(Enemy.Coordinate.X, Enemy.Coordinate.Y, TileData) &&
+            TileData.bEnemySpawnAllowed && TileData.TileType != ETileType::Extraction);
+        TestEqual(TEXT("Debug enemy remains hidden until gameplay detection"),
+            Enemy.KnowledgeState, EEnemyKnowledgeState::Hidden);
+        TestFalse(TEXT("Debug spawn does not start combat"), GameMode->CombatComponent->bHasActiveEnemy);
+    }
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FGridLootMasterEnemyWorldRandomWanderTest,
     "GridLootMaster.EnemyWorld.RandomWander",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)

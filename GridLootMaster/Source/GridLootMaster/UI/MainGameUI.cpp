@@ -13,6 +13,7 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/SizeBox.h"
 #include "Components/WidgetSwitcher.h"
+#include "Components/ScrollBox.h"
 #include "MinimapWidget.h"
 #include "GridBoardWidget.h"
 #include "DraggableItemWidget.h"
@@ -45,7 +46,7 @@ bool UMainGameUI::Initialize()
         UHorizontalBox* HBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("MainLayout"));
         UCanvasPanelSlot* HBoxSlot = RootCanvas->AddChildToCanvas(HBox);
         HBoxSlot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
-        HBoxSlot->SetOffsets(FMargin(50.0f, 50.0f, 50.0f, 50.0f));
+        HBoxSlot->SetOffsets(FMargin(30.0f, 30.0f, 30.0f, 30.0f));
 
         AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
 
@@ -84,13 +85,13 @@ bool UMainGameUI::Initialize()
         LeftPanel = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LeftPanel"));
         UHorizontalBoxSlot* LeftPanelSlot = HBox->AddChildToHorizontalBox(LeftPanel);
         LeftPanelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
-        LeftPanelSlot->SetPadding(FMargin(0, 0, 40, 0));
+        LeftPanelSlot->SetPadding(FMargin(0, 0, 25, 0));
 
         // --- 왼쪽 패널: 헬멧, 방어구, 무기 ---
-        AddToVertical(LeftPanel, CreateEquipSlotEx(HelmetSlot, TEXT("Helmet"), EItemCategory::Helmet, TEXT("Helmet"), 192.0f, 192.0f));
-        AddToVertical(LeftPanel, CreateEquipSlotEx(ArmorSlot, TEXT("Armor"), EItemCategory::Armor, TEXT("Armor"), 192.0f, 320.0f));
-        AddToVertical(LeftPanel, CreateEquipSlotEx(WeaponSlot1, TEXT("Primary1"), EItemCategory::Weapon, TEXT("Primary Weapon 1"), 320.0f, 128.0f));
-        AddToVertical(LeftPanel, CreateEquipSlotEx(WeaponSlot2, TEXT("Primary2"), EItemCategory::Weapon, TEXT("Primary Weapon 2"), 320.0f, 128.0f));
+        AddToVertical(LeftPanel, CreateEquipSlotEx(HelmetSlot, TEXT("Helmet"), EItemCategory::Helmet, TEXT("Helmet"), 173.0f, 173.0f));
+        AddToVertical(LeftPanel, CreateEquipSlotEx(ArmorSlot, TEXT("Armor"), EItemCategory::Armor, TEXT("Armor"), 173.0f, 288.0f));
+        AddToVertical(LeftPanel, CreateEquipSlotEx(WeaponSlot1, TEXT("Primary1"), EItemCategory::Weapon, TEXT("Primary Weapon 1"), 288.0f, 115.0f));
+        AddToVertical(LeftPanel, CreateEquipSlotEx(WeaponSlot2, TEXT("Primary2"), EItemCategory::Weapon, TEXT("Primary Weapon 2"), 288.0f, 115.0f));
 
         // === 2. 중앙 패널 (Rig, Pocket, Backpack, SafeBox) ===
         UVerticalBox* MiddlePanel = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("MiddlePanel"));
@@ -226,6 +227,39 @@ bool UMainGameUI::Initialize()
         CombatActionText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("CombatActionText"));
         RightPanel->AddChildToVerticalBox(CombatActionText);
 
+        EventLogBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("EventLogBorder"));
+        EventLogBorder->SetBrushColor(FLinearColor(0.01f, 0.02f, 0.03f, 0.78f));
+        EventLogBorder->SetVisibility(ESlateVisibility::HitTestInvisible);
+        EventLogScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("EventLogScrollBox"));
+        EventLogScrollBox->SetVisibility(ESlateVisibility::HitTestInvisible);
+        EventLogBorder->AddChild(EventLogScrollBox);
+        USizeBox* EventLogSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("EventLogSize"));
+        EventLogSize->SetHeightOverride(150.0f);
+        EventLogSize->AddChild(EventLogBorder);
+        UVerticalBoxSlot* EventLogSlot = RightPanel->AddChildToVerticalBox(EventLogSize);
+        EventLogSlot->SetPadding(FMargin(0, 8, 0, 4));
+
+        UTextBlock* EventLogTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        EventLogTitle->SetText(FText::FromString(TEXT("EVENT LOG")));
+        EventLogTitle->SetColorAndOpacity(FLinearColor(0.7f, 0.9f, 1.0f, 1.0f));
+        EventLogScrollBox->AddChild(EventLogTitle);
+
+        StatusPanelText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("StatusPanelText"));
+        StatusPanelText->SetColorAndOpacity(FLinearColor(0.85f, 0.95f, 1.0f, 1.0f));
+        FSlateFontInfo StatusFont = StatusPanelText->GetFont();
+        StatusFont.Size = 14;
+        StatusPanelText->SetFont(StatusFont);
+        UBorder* StatusPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("StatusPanel"));
+        StatusPanel->SetBrushColor(FLinearColor(0.01f, 0.02f, 0.03f, 0.8f));
+        StatusPanel->SetPadding(FMargin(10.0f));
+        StatusPanel->AddChild(StatusPanelText);
+        UCanvasPanelSlot* StatusSlot = RootCanvas->AddChildToCanvas(StatusPanel);
+        StatusSlot->SetAnchors(FAnchors(0.0f, 1.0f));
+        StatusSlot->SetAlignment(FVector2D(0.0f, 1.0f));
+        StatusSlot->SetPosition(FVector2D(30.0f, -30.0f));
+        StatusSlot->SetSize(FVector2D(300.0f, 150.0f));
+        StatusSlot->SetZOrder(12);
+
         UBorder* Spacer1 = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
         Spacer1->SetBrushColor(FLinearColor::Transparent);
         UVerticalBoxSlot* SpacerSlot1 = RightPanel->AddChildToVerticalBox(Spacer1);
@@ -329,7 +363,10 @@ bool UMainGameUI::Initialize()
             FScriptDelegate Delegate;
             Delegate.BindUFunction(this, FunctionName);
             OutButton->OnClicked.Add(Delegate);
-            RightPanel->AddChildToVerticalBox(OutButton);
+            if (UVerticalBoxSlot* ButtonSlot = RightPanel->AddChildToVerticalBox(OutButton))
+            {
+                ButtonSlot->SetPadding(FMargin(0, 2, 0, 0));
+            }
         };
         AddAmbushButton(AmbushWaitBtn, TEXT("AmbushWaitButton"), TEXT("WAIT"), TEXT("OnAmbushWaitButtonClicked"));
         AddAmbushButton(AmbushCancelBtn, TEXT("AmbushCancelButton"), TEXT("CANCEL"), TEXT("OnAmbushCancelButtonClicked"));
@@ -338,6 +375,19 @@ bool UMainGameUI::Initialize()
         AddAmbushButton(EnemyAmbushSearchBtn, TEXT("EnemyAmbushSearchButton"), TEXT("SEARCH"), TEXT("OnEnemyAmbushSearchButtonClicked"));
         AddAmbushButton(EnemyAmbushCoverBtn, TEXT("EnemyAmbushCoverButton"), TEXT("COVER"), TEXT("OnEnemyAmbushCoverButtonClicked"));
         AddAmbushButton(EnemyAmbushFleeBtn, TEXT("EnemyAmbushFleeButton"), TEXT("FLEE"), TEXT("OnEnemyAmbushFleeButtonClicked"));
+
+#if !UE_BUILD_SHIPPING
+        DebugSpawnEnemyBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("DebugSpawnEnemyButton"));
+        UTextBlock* DebugSpawnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        DebugSpawnText->SetText(FText::FromString(TEXT("DEBUG SPAWN ENEMY")));
+        DebugSpawnText->SetColorAndOpacity(FLinearColor::Black);
+        DebugSpawnEnemyBtn->AddChild(DebugSpawnText);
+        DebugSpawnEnemyBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnDebugSpawnEnemyClicked);
+        if (UVerticalBoxSlot* DebugSlot = RightPanel->AddChildToVerticalBox(DebugSpawnEnemyBtn))
+        {
+            DebugSlot->SetPadding(FMargin(0, 6, 0, 0));
+        }
+#endif
 
         // --- 인벤토리/장비 컴포넌트 연결 ---
         if (GM)
@@ -423,6 +473,7 @@ void UMainGameUI::RefreshMinimaps(UMapManagerComponent* InMapManager)
 void UMainGameUI::OnMinimapPlayerMoved(FIntPoint NewCoordinate)
 {
     UpdateActionAvailability();
+    AddEventLogEntry(FString::Printf(TEXT("Player Moved: %d-%d"), NewCoordinate.X, NewCoordinate.Y));
 
     if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
     {
@@ -478,6 +529,13 @@ void UMainGameUI::UpdateActionAvailability()
     if (EnemyAmbushSearchBtn) EnemyAmbushSearchBtn->SetVisibility(bEnemyAmbush ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
     if (EnemyAmbushCoverBtn) EnemyAmbushCoverBtn->SetVisibility(bEnemyAmbush ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
     if (EnemyAmbushFleeBtn) EnemyAmbushFleeBtn->SetVisibility(bEnemyAmbush ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+#if !UE_BUILD_SHIPPING
+    if (DebugSpawnEnemyBtn)
+    {
+        DebugSpawnEnemyBtn->SetVisibility(bInRaid ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+        DebugSpawnEnemyBtn->SetIsEnabled(bInRaid && !bInCombat && !bEnemyAmbush);
+    }
+#endif
     if (MinimapUI && MinimapUI->AdvanceButton)
     {
         MinimapUI->AdvanceButton->SetIsEnabled(bInRaid && !bInCombat && MinimapUI->CurrentPath.Num() > 0);
@@ -565,6 +623,30 @@ void UMainGameUI::OnExtractButtonClicked()
     if (GM) GM->ExtractRaid();
 }
 
+void UMainGameUI::OnDebugSpawnEnemyClicked()
+{
+#if !UE_BUILD_SHIPPING
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (!GM || GM->RaidState != ERaidState::InRaid || !GM->EnemyManagerComponent)
+    {
+        QueueEventNotification(TEXT("DEBUG SPAWN은 레이드 중에만 사용할 수 있습니다."));
+        return;
+    }
+    if (GM->EnemyManagerComponent->DebugSpawnNearestScav())
+    {
+        const TArray<FEnemyWorldInstance>& Enemies = GM->EnemyManagerComponent->GetEnemyInstances();
+        if (Enemies.Num() > 0)
+        {
+            const FEnemyWorldInstance& Enemy = Enemies.Last();
+            QueueEventNotification(FString::Printf(TEXT("DEBUG Enemy Spawned: SCAV @ %d-%d"),
+                Enemy.Coordinate.X, Enemy.Coordinate.Y));
+        }
+        return;
+    }
+    QueueEventNotification(TEXT("유효한 DEBUG Spawn Tile을 찾지 못했습니다."));
+#endif
+}
+
 FReply UMainGameUI::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
     FKey Key = InKeyEvent.GetKey();
@@ -611,7 +693,11 @@ FReply UMainGameUI::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent
 void UMainGameUI::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
     Super::NativeTick(MyGeometry, InDeltaTime);
+    if (MinimapUI) MinimapUI->RefreshEnemyDebugMarkers();
+    if (CompactMinimapUI) CompactMinimapUI->RefreshEnemyDebugMarkers();
+    UpdateEnemyEventLog();
     UpdateCombatUI();
+    UpdateStatusPanel();
 }
 
 void UMainGameUI::UpdateScore(int32 NewScore)
@@ -738,6 +824,40 @@ void UMainGameUI::UpdateCombatUI()
         LastDisplayedCombatMessage = Message;
         QueueEventNotification(Message);
     }
+
+}
+
+void UMainGameUI::UpdateStatusPanel()
+{
+    if (!StatusPanelText) return;
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (!GM || !GM->CombatComponent) return;
+
+    UItemInstance* StatusWeapon = GM->EquipmentComponent
+        ? GM->EquipmentComponent->GetEquippedItem(GM->CombatComponent->ActiveWeaponSlot) : nullptr;
+    FString AmmoText = TEXT("-");
+    if (StatusWeapon && StatusWeapon->EquippedMagazine)
+    {
+        AmmoText = FString::Printf(TEXT("%d / %d"), StatusWeapon->EquippedMagazine->CurrentAmmo,
+            StatusWeapon->EquippedMagazine->MaxAmmo);
+    }
+    FString ActionState = TEXT("READY");
+    if (GM->CombatComponent->PlayerActionState == ECombatPlayerActionState::Swapping)
+    {
+        ActionState = TEXT("SWAPPING");
+    }
+    else if (GM->CombatComponent->PlayerActionState == ECombatPlayerActionState::Reloading)
+    {
+        ActionState = TEXT("RELOADING");
+    }
+    const FString EnemyText = GM->CombatComponent->bHasActiveEnemy
+        ? GM->CombatComponent->CurrentEnemy.Definition.DisplayName : TEXT("NONE");
+    const int32 ElapsedSeconds = FMath::Max(0, FMath::FloorToInt(GM->TotalTimeLimit - GM->RemainingTime));
+    StatusPanelText->SetText(FText::FromString(FString::Printf(
+        TEXT("HP %d / %d\nTIME %02d:%02d  SCORE %d / %d\nWEAPON %s\nAMMO %s  STATE %s\nRECOIL %.0f  ENEMY %s"),
+        GM->CurrentHealth, GM->MaxHealth, ElapsedSeconds / 60, ElapsedSeconds % 60,
+        GM->CurrentScore, GM->QuotaScore, StatusWeapon ? *StatusWeapon->ItemName : TEXT("NONE"),
+        *AmmoText, *ActionState, GM->CombatComponent->CurrentRecoil, *EnemyText)));
 }
 
 void UMainGameUI::ShowEventNotification(FString Message)
@@ -760,9 +880,79 @@ void UMainGameUI::ShowEventNotification(FString Message)
     }
 }
 
+void UMainGameUI::UpdateEnemyEventLog()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (!GM || GM->RaidState != ERaidState::InRaid || !GM->EnemyManagerComponent)
+    {
+        if (bEnemyEventLogRaidActive)
+        {
+            LastEnemyCoordinates.Empty();
+            LastEnemyKnowledgeStates.Empty();
+            bEnemyEventLogRaidActive = false;
+            bLastCombatActive = false;
+        }
+        return;
+    }
+
+    bEnemyEventLogRaidActive = true;
+    TSet<FName> AliveEnemyIDs;
+    for (const FEnemyWorldInstance& Enemy : GM->EnemyManagerComponent->GetEnemyInstances())
+    {
+        if (!Enemy.bAlive) continue;
+        AliveEnemyIDs.Add(Enemy.InstanceID);
+        const FString EnemyName = Enemy.Definition.DisplayName.IsEmpty()
+            ? Enemy.InstanceID.ToString() : Enemy.Definition.DisplayName;
+        if (!LastEnemyCoordinates.Contains(Enemy.InstanceID))
+        {
+            AddEventLogEntry(FString::Printf(TEXT("Enemy Spawned: %s @ %d-%d"), *EnemyName,
+                Enemy.Coordinate.X, Enemy.Coordinate.Y));
+        }
+        else if (LastEnemyCoordinates[Enemy.InstanceID] != Enemy.Coordinate)
+        {
+            AddEventLogEntry(FString::Printf(TEXT("%s moved %d-%d -> %d-%d"), *EnemyName,
+                LastEnemyCoordinates[Enemy.InstanceID].X, LastEnemyCoordinates[Enemy.InstanceID].Y,
+                Enemy.Coordinate.X, Enemy.Coordinate.Y));
+        }
+        if (EEnemyKnowledgeState* PreviousState = LastEnemyKnowledgeStates.Find(Enemy.InstanceID))
+        {
+            if (*PreviousState != Enemy.KnowledgeState)
+            {
+                const TCHAR* StateName = Enemy.KnowledgeState == EEnemyKnowledgeState::Suspected
+                    ? TEXT("Suspected") : Enemy.KnowledgeState == EEnemyKnowledgeState::Revealed
+                        ? TEXT("Revealed") : TEXT("Hidden");
+                AddEventLogEntry(FString::Printf(TEXT("Enemy %s: %s"), StateName, *EnemyName));
+            }
+        }
+        LastEnemyCoordinates.Add(Enemy.InstanceID, Enemy.Coordinate);
+        LastEnemyKnowledgeStates.Add(Enemy.InstanceID, Enemy.KnowledgeState);
+    }
+
+    TArray<FName> KnownEnemyIDs;
+    LastEnemyCoordinates.GetKeys(KnownEnemyIDs);
+    for (const FName EnemyID : KnownEnemyIDs)
+    {
+        if (!AliveEnemyIDs.Contains(EnemyID))
+        {
+            AddEventLogEntry(FString::Printf(TEXT("Enemy Killed: %s"), *EnemyID.ToString()));
+            LastEnemyCoordinates.Remove(EnemyID);
+            LastEnemyKnowledgeStates.Remove(EnemyID);
+        }
+    }
+
+    const bool bCombatActive = GM->CombatComponent && GM->CombatComponent->bHasActiveEnemy;
+    if (bCombatActive && !bLastCombatActive)
+    {
+        AddEventLogEntry(TEXT("Combat Started"));
+    }
+    bLastCombatActive = bCombatActive;
+}
+
 void UMainGameUI::QueueEventNotification(FString Message)
 {
     if (Message.IsEmpty() || !EventNotificationText) return;
+
+    AddEventLogEntry(Message);
 
     PendingEventNotifications.Add(Message);
     if (EventNotificationText->GetVisibility() == ESlateVisibility::Visible)
@@ -783,6 +973,33 @@ void UMainGameUI::QueueEventNotification(FString Message)
         World->GetTimerManager().SetTimer(
             EventNotificationTimerHandle, this, &UMainGameUI::OnEventNotificationTimerExpired, 2.5f, false);
     }
+}
+
+void UMainGameUI::AddEventLogEntry(const FString& Message)
+{
+    if (Message.IsEmpty() || !EventLogScrollBox) return;
+
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    const int32 ElapsedSeconds = GM ? FMath::Max(0, FMath::FloorToInt(GM->TotalTimeLimit - GM->RemainingTime)) : 0;
+    EventLogEntries.Add(FString::Printf(TEXT("[%02d:%02d] %s"), ElapsedSeconds / 60, ElapsedSeconds % 60, *Message));
+    while (EventLogEntries.Num() > 10)
+    {
+        EventLogEntries.RemoveAt(0);
+    }
+
+    EventLogScrollBox->ClearChildren();
+    UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+    Title->SetText(FText::FromString(TEXT("EVENT LOG")));
+    Title->SetColorAndOpacity(FLinearColor(0.7f, 0.9f, 1.0f, 1.0f));
+    EventLogScrollBox->AddChild(Title);
+    for (const FString& Entry : EventLogEntries)
+    {
+        UTextBlock* Line = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        Line->SetText(FText::FromString(Entry));
+        Line->SetColorAndOpacity(FLinearColor::White);
+        EventLogScrollBox->AddChild(Line);
+    }
+    EventLogScrollBox->ScrollToEnd();
 }
 
 void UMainGameUI::OnEventNotificationTimerExpired()

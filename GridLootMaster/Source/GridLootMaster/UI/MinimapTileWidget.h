@@ -35,6 +35,12 @@ public:
     UPROPERTY()
     class UTextBlock* ZoneText;
 
+    UPROPERTY()
+    class UBorder* EnemyMarkerBorder;
+
+    UPROPERTY()
+    class UTextBlock* EnemyMarkerText;
+
     FIntPoint TileCoord;
     class UMinimapWidget* ParentMinimap;
 
@@ -42,6 +48,8 @@ public:
     void RefreshTileData(const FTileData& InData);
     void SetIsPath(bool bIsPath);
     void SetHasPlayer(bool bHasPlayer);
+    void SetEnemyDebugMarker(bool bVisible, const FString& MarkerText, const FLinearColor& MarkerColor,
+        const FString& TooltipText);
     void TriggerClick();
 
 protected:

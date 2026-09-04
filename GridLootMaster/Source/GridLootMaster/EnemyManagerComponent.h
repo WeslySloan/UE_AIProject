@@ -138,6 +138,9 @@ public:
     bool SpawnEnemyAt(const FEnemyDefinition& EnemyDefinition, FIntPoint Coordinate,
         EEnemyBehaviorProfile BehaviorProfile = EEnemyBehaviorProfile::RandomWander);
 
+    // Development/Editor Manual QA only. Uses the same World Enemy instance path as scheduled spawns.
+    bool DebugSpawnNearestScav();
+
     bool HasEnemyAt(FIntPoint Coordinate) const;
 
     int32 GetAliveEnemyCount() const;

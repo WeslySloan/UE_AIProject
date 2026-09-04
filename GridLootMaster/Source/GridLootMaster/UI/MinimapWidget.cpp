@@ -56,6 +56,7 @@ void UMinimapWidget::InitMinimap(UMapManagerComponent* InMapManager, bool bInCom
         {
             (*StartTile)->SetHasPlayer(true);
         }
+        RefreshEnemyDebugMarkers();
         PublishMovementState();
         return;
     }
@@ -122,6 +123,45 @@ void UMinimapWidget::InitMinimap(UMapManagerComponent* InMapManager, bool bInCom
     {
         (*StartTile)->SetHasPlayer(true);
     }
+    RefreshEnemyDebugMarkers();
+}
+
+void UMinimapWidget::RefreshEnemyDebugMarkers()
+{
+#if UE_BUILD_SHIPPING
+    return;
+#else
+    AGridGameMode* GM = nullptr;
+    if (UWorld* World = GetWorld())
+    {
+        GM = Cast<AGridGameMode>(World->GetAuthGameMode());
+    }
+    for (const TPair<FIntPoint, UMinimapTileWidget*>& Pair : TileWidgets)
+    {
+        Pair.Value->SetEnemyDebugMarker(false, TEXT(""), FLinearColor::Transparent, TEXT(""));
+    }
+    if (!GM || !GM->EnemyManagerComponent)
+    {
+        return;
+    }
+    for (const FEnemyWorldInstance& Enemy : GM->EnemyManagerComponent->GetEnemyInstances())
+    {
+        if (!Enemy.bAlive) continue;
+        if (UMinimapTileWidget** Tile = TileWidgets.Find(Enemy.Coordinate))
+        {
+            const bool bAmbusher = Enemy.BehaviorProfile == EEnemyBehaviorProfile::Ambusher;
+            const FString Marker = bAmbusher ? TEXT("A") : TEXT("E");
+            const FLinearColor Color = bAmbusher
+                ? FLinearColor(1.0f, 0.45f, 0.02f, 0.95f)
+                : FLinearColor(0.9f, 0.05f, 0.02f, 0.95f);
+            const FString Tooltip = FString::Printf(TEXT("%s %s @ %d-%d | %s"),
+                *Enemy.Definition.DisplayName, *Enemy.InstanceID.ToString(),
+                Enemy.Coordinate.X, Enemy.Coordinate.Y,
+                *UEnum::GetValueAsString(Enemy.KnowledgeState));
+            (*Tile)->SetEnemyDebugMarker(true, Marker, Color, Tooltip);
+        }
+    }
+#endif
 }
 
 FReply UMinimapWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)

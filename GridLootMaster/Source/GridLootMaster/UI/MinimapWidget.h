@@ -55,6 +55,7 @@ public:
         const TArray<FIntPoint>& InPath, int32 InMoveProgress);
     void ResetMovement();
     void HandleTileClicked(FIntPoint ClickedCoord);
+    void RefreshEnemyDebugMarkers();
 
     UFUNCTION()
     void OnAdvanceClicked();

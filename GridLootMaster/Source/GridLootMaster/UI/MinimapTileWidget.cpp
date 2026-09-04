@@ -134,6 +134,24 @@ void UMinimapTileWidget::InitTile(const FTileData& InData, UMinimapWidget* InPar
         PlayerSlot->SetPadding(FMargin(FMath::Max(2.0f, InTileSize * 0.15625f)));
     }
 
+    EnemyMarkerBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+    EnemyMarkerBorder->SetBrushColor(FLinearColor(0.85f, 0.05f, 0.02f, 0.95f));
+    EnemyMarkerBorder->SetVisibility(ESlateVisibility::Hidden);
+    EnemyMarkerText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+    EnemyMarkerText->SetText(FText::FromString(TEXT("E")));
+    EnemyMarkerText->SetColorAndOpacity(FLinearColor::White);
+    FSlateFontInfo EnemyFont = EnemyMarkerText->GetFont();
+    EnemyFont.Size = InTileSize <= 24.0f ? 7 : 11;
+    EnemyMarkerText->SetFont(EnemyFont);
+    EnemyMarkerText->SetJustification(ETextJustify::Center);
+    EnemyMarkerBorder->AddChild(EnemyMarkerText);
+    if (UOverlaySlot* EnemySlot = Cast<UOverlaySlot>(Overlay->AddChild(EnemyMarkerBorder)))
+    {
+        EnemySlot->SetHorizontalAlignment(HAlign_Right);
+        EnemySlot->SetVerticalAlignment(VAlign_Top);
+        EnemySlot->SetPadding(FMargin(InTileSize <= 24.0f ? 1.0f : 2.0f));
+    }
+
     // 5. 4면 벽(Edge) 표시
     auto CreateWall = [&](bool bIsOpen, EVerticalAlignment VAlign, EHorizontalAlignment HAlign) {
         UBorder* Wall = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
@@ -243,6 +261,24 @@ void UMinimapTileWidget::SetHasPlayer(bool bHasPlayer)
     if (PlayerIcon)
     {
         PlayerIcon->SetVisibility(bHasPlayer ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
+    }
+}
+
+void UMinimapTileWidget::SetEnemyDebugMarker(bool bVisible, const FString& MarkerText,
+    const FLinearColor& MarkerColor, const FString& TooltipText)
+{
+#if UE_BUILD_SHIPPING
+    bVisible = false;
+#endif
+    if (EnemyMarkerBorder)
+    {
+        EnemyMarkerBorder->SetBrushColor(MarkerColor);
+        EnemyMarkerBorder->SetVisibility(bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
+        EnemyMarkerBorder->SetToolTipText(FText::FromString(TooltipText));
+    }
+    if (EnemyMarkerText)
+    {
+        EnemyMarkerText->SetText(FText::FromString(MarkerText));
     }
 }
 

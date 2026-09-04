@@ -70,6 +70,49 @@ bool UEnemyManagerComponent::SpawnEnemyAt(const FEnemyDefinition& EnemyDefinitio
     return true;
 }
 
+bool UEnemyManagerComponent::DebugSpawnNearestScav()
+{
+#if UE_BUILD_SHIPPING
+    return false;
+#else
+    AGridGameMode* GameMode = Cast<AGridGameMode>(GetOwner());
+    UMapManagerComponent* MapManager = GameMode ? GameMode->MapManagerComponent : nullptr;
+    if (!GameMode || GameMode->RaidState != ERaidState::InRaid || !MapManager ||
+        GetAliveEnemyCount() >= FMath::Max(0, MaxAliveEnemies))
+    {
+        return false;
+    }
+
+    TArray<FIntPoint> Candidates;
+    for (int32 Y = 0; Y < MapManager->MapHeight; ++Y)
+    {
+        for (int32 X = 0; X < MapManager->MapWidth; ++X)
+        {
+            const FIntPoint Candidate(X, Y);
+            FTileData TileData;
+            if (!MapManager->GetTileData(X, Y, TileData) || !TileData.bEnemySpawnAllowed ||
+                TileData.TileType == ETileType::Extraction || Candidate == GameMode->CurrentPlayerCoord ||
+                HasEnemyAt(Candidate) || !MapManager->FindPath(GameMode->CurrentPlayerCoord, Candidate).Num())
+            {
+                continue;
+            }
+            Candidates.Add(Candidate);
+        }
+    }
+
+    Candidates.Sort([GameMode](const FIntPoint& A, const FIntPoint& B)
+    {
+        const int32 ADistance = FMath::Abs(A.X - GameMode->CurrentPlayerCoord.X) +
+            FMath::Abs(A.Y - GameMode->CurrentPlayerCoord.Y);
+        const int32 BDistance = FMath::Abs(B.X - GameMode->CurrentPlayerCoord.X) +
+            FMath::Abs(B.Y - GameMode->CurrentPlayerCoord.Y);
+        return ADistance < BDistance;
+    });
+
+    return Candidates.Num() > 0 && SpawnEnemyAt(ScheduledEnemyDefinition, Candidates[0]);
+#endif
+}
+
 bool UEnemyManagerComponent::HasEnemyAt(FIntPoint Coordinate) const
 {
     return OccupiedTiles.Contains(Coordinate);

@@ -3,11 +3,14 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "../ItemData.h"
+#include "../EnemyManagerComponent.h"
 #include "MainGameUI.generated.h"
 
 class UTextBlock;
 class UGridBoardWidget;
 class UEquipmentSlotWidget;
+class UScrollBox;
+class UVerticalBox;
 
 UCLASS()
 class GRIDLOOTMASTER_API UMainGameUI : public UUserWidget
@@ -88,6 +91,9 @@ public:
     UFUNCTION()
     void OnExtractButtonClicked();
 
+    UFUNCTION()
+    void OnDebugSpawnEnemyClicked();
+
 public:
     UPROPERTY()
     class UWidgetSwitcher* RightPanelSwitcher;
@@ -126,7 +132,19 @@ public:
     class UBorder* EventNotificationBorder;
 
     UPROPERTY()
+    class UBorder* EventLogBorder;
+
+    UPROPERTY()
+    UScrollBox* EventLogScrollBox;
+
+    UPROPERTY()
+    UTextBlock* StatusPanelText;
+
+    UPROPERTY()
     TArray<FString> PendingEventNotifications;
+
+    UPROPERTY()
+    TArray<FString> EventLogEntries;
 
     UPROPERTY()
     FString LastDisplayedCombatMessage;
@@ -226,12 +244,24 @@ public:
     UPROPERTY()
     class UButton* StashBtn;
 
+    UPROPERTY()
+    class UButton* DebugSpawnEnemyBtn;
+
 protected:
     UFUNCTION()
     void OnStashInventoryChanged();
 
     UFUNCTION()
     void OnEventNotificationTimerExpired();
+
+    void AddEventLogEntry(const FString& Message);
+    void UpdateStatusPanel();
+    void UpdateEnemyEventLog();
+
+    TMap<FName, FIntPoint> LastEnemyCoordinates;
+    TMap<FName, EEnemyKnowledgeState> LastEnemyKnowledgeStates;
+    bool bEnemyEventLogRaidActive = false;
+    bool bLastCombatActive = false;
 
     FTimerHandle EventNotificationTimerHandle;
 };
