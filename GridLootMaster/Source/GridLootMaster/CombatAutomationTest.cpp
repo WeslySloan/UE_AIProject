@@ -1209,14 +1209,12 @@ bool FGridLootMasterMinimapPathLockTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("A path is selected before movement begins"), Minimap->CurrentPath.Num() > 0);
     Minimap->OnAdvanceClicked();
 
-    const TArray<FIntPoint> SelectedPath = Minimap->CurrentPath;
-    const FIntPoint SelectedTarget = Minimap->CurrentTargetCoord;
-    TestEqual(TEXT("Movement records one progress step"), Minimap->CurrentMoveProgress, 1);
+    TestEqual(TEXT("One advance moves exactly one tile"), Minimap->CurrentPlayerCoord, FIntPoint(1, 0));
+    TestEqual(TEXT("One-tile movement consumes one world turn"), Minimap->CurrentMoveProgress, 0);
 
     Minimap->HandleTileClicked(FIntPoint(0, 1));
-    TestEqual(TEXT("Changing destination does not reset movement progress"), Minimap->CurrentMoveProgress, 1);
-    TestEqual(TEXT("Changing destination does not replace the selected target"), Minimap->CurrentTargetCoord, SelectedTarget);
-    TestTrue(TEXT("Changing destination does not replace the selected path"), Minimap->CurrentPath == SelectedPath);
+    TestEqual(TEXT("A new destination can be selected after the tile move"), Minimap->CurrentTargetCoord, FIntPoint(0, 1));
+    TestEqual(TEXT("Movement progress remains zero between tile turns"), Minimap->CurrentMoveProgress, 0);
 
     Minimap->RemoveFromParent();
     GameMode->CombatComponent->ClearEnemy();
@@ -1263,10 +1261,10 @@ bool FGridLootMasterMinimapReinitializationClearsMovementTest::RunTest(const FSt
     }
 
     Minimap->InitMinimap(GameMode->MapManagerComponent);
-    Minimap->HandleTileClicked(FIntPoint(1, 0));
+    Minimap->HandleTileClicked(FIntPoint(2, 0));
     Minimap->OnAdvanceClicked();
     TestTrue(TEXT("Movement state exists before minimap reinitialization"), Minimap->CurrentPath.Num() > 0);
-    TestEqual(TEXT("Movement progress exists before minimap reinitialization"), Minimap->CurrentMoveProgress, 1);
+    TestEqual(TEXT("Movement progress remains zero after a tile move"), Minimap->CurrentMoveProgress, 0);
 
     Minimap->InitMinimap(GameMode->MapManagerComponent);
     TestEqual(TEXT("Reinitialization clears the selected path"), Minimap->CurrentPath.Num(), 0);
@@ -1320,15 +1318,14 @@ bool FGridLootMasterCombatResumesMovementTest::RunTest(const FString& Parameters
 
     Minimap->OnPlayerMoved.AddDynamic(GameMode, &AGridGameMode::HandlePlayerMoved);
     Minimap->InitMinimap(GameMode->MapManagerComponent);
-    Minimap->HandleTileClicked(FIntPoint(2, 0));
-    TestEqual(TEXT("A two-tile route is selected"), Minimap->CurrentPath.Num(), 2);
+    Minimap->HandleTileClicked(FIntPoint(3, 0));
+    const int32 SelectedRouteLength = Minimap->CurrentPath.Num();
+    TestTrue(TEXT("A route is selected"), SelectedRouteLength > 1);
 
-    Minimap->OnAdvanceClicked();
-    Minimap->OnAdvanceClicked();
     Minimap->OnAdvanceClicked();
     TestFalse(TEXT("Moving onto the first tile does not create a random encounter"), GameMode->CombatComponent->bHasActiveEnemy);
     TestEqual(TEXT("The first tile is reached before combat"), Minimap->CurrentPlayerCoord, FIntPoint(1, 0));
-    TestEqual(TEXT("The remaining route is preserved during combat"), Minimap->CurrentPath.Num(), 1);
+    TestEqual(TEXT("The remaining route is preserved during combat"), Minimap->CurrentPath.Num(), SelectedRouteLength - 1);
 
     FEnemyDefinition Enemy;
     Enemy.EnemyID = TEXT("ExplicitCombatMovementEnemy");
@@ -1339,11 +1336,12 @@ bool FGridLootMasterCombatResumesMovementTest::RunTest(const FString& Parameters
     TestEqual(TEXT("Movement remains locked during explicit combat"), Minimap->CurrentMoveProgress, 0);
 
     GameMode->CombatComponent->ClearEnemy();
-    Minimap->OnAdvanceClicked();
-    Minimap->OnAdvanceClicked();
-    Minimap->OnAdvanceClicked();
+    while (Minimap->CurrentPath.Num() > 0)
+    {
+        Minimap->OnAdvanceClicked();
+    }
 
-    TestEqual(TEXT("Movement resumes after combat ends"), Minimap->CurrentPlayerCoord, FIntPoint(2, 0));
+    TestEqual(TEXT("Movement resumes after combat ends"), Minimap->CurrentPlayerCoord, FIntPoint(3, 0));
     TestEqual(TEXT("The resumed route is completed"), Minimap->CurrentPath.Num(), 0);
 
     Minimap->RemoveFromParent();
@@ -1773,7 +1771,7 @@ bool FGridLootMasterMinimapResetTest::RunTest(const FString& Parameters)
     Minimap->InitMinimap(MapManager);
     Minimap->HandleTileClicked(FIntPoint(1, 0));
     Minimap->OnAdvanceClicked();
-    TestEqual(TEXT("Movement progress exists before reset"), Minimap->CurrentMoveProgress, 1);
+    TestEqual(TEXT("Movement progress remains zero after a tile move"), Minimap->CurrentMoveProgress, 0);
 
     Minimap->ResetMovement();
     TestEqual(TEXT("Reset returns to the configured start coordinate"),
@@ -1864,12 +1862,10 @@ bool FGridLootMasterMinimapSharedMovementStateTest::RunTest(const FString& Param
 
     CompactMinimap->OnAdvanceClicked();
     TestEqual(TEXT("Compact advance input updates the source progress"),
-        FullMinimap->CurrentMoveProgress, 1);
+        FullMinimap->CurrentMoveProgress, 0);
     TestEqual(TEXT("Source progress is mirrored back to the compact minimap"),
         CompactMinimap->CurrentMoveProgress, FullMinimap->CurrentMoveProgress);
 
-    FullMinimap->OnAdvanceClicked();
-    FullMinimap->OnAdvanceClicked();
     TestEqual(TEXT("Source minimap reaches the next tile"), FullMinimap->CurrentPlayerCoord, FIntPoint(1, 0));
     TestEqual(TEXT("Compact minimap reaches the same tile"), CompactMinimap->CurrentPlayerCoord, FIntPoint(1, 0));
     TestEqual(TEXT("Both minimaps finish the same path"), CompactMinimap->CurrentPath.Num(), 0);
@@ -1947,12 +1943,18 @@ bool FGridLootMasterScorePreservesMovementTest::RunTest(const FString& Parameter
     GameMode->CombatComponent->ClearEnemy();
 
     MainUI->MinimapUI->InitMinimap(GameMode->MapManagerComponent);
-    MainUI->MinimapUI->HandleTileClicked(FIntPoint(1, 0));
+    for (int32 Y = 0; Y < GameMode->MapManagerComponent->MapHeight && MainUI->MinimapUI->CurrentPath.Num() == 0; ++Y)
+    {
+        for (int32 X = 0; X < GameMode->MapManagerComponent->MapWidth && MainUI->MinimapUI->CurrentPath.Num() == 0; ++X)
+        {
+            MainUI->MinimapUI->HandleTileClicked(FIntPoint(X, Y));
+        }
+    }
     MainUI->MinimapUI->OnAdvanceClicked();
-    TestEqual(TEXT("Movement progress exists before scoring"), MainUI->MinimapUI->CurrentMoveProgress, 1);
+    TestEqual(TEXT("Movement progress is zero after a one-tile advance"), MainUI->MinimapUI->CurrentMoveProgress, 0);
 
     GameMode->AddScore(1);
-    TestEqual(TEXT("Scoring does not reset movement progress"), MainUI->MinimapUI->CurrentMoveProgress, 1);
+    TestEqual(TEXT("Scoring does not reset movement progress"), MainUI->MinimapUI->CurrentMoveProgress, 0);
 
     MainUI->MinimapUI->ResetMovement();
     GameMode->RaidState = PreviousRaidState;
@@ -2115,12 +2117,23 @@ bool FGridLootMasterTerminalRaidClearsMovementTest::RunTest(const FString& Param
     const ERaidState PreviousRaidState = GameMode->RaidState;
     GameMode->RaidState = ERaidState::InRaid;
     GameMode->CombatComponent->ClearEnemy();
+    if (GameMode->EnemyManagerComponent)
+    {
+        GameMode->EnemyManagerComponent->ResetForRaid();
+    }
+    GameMode->MapManagerComponent->InitializeMap();
 
     MainUI->MinimapUI->InitMinimap(GameMode->MapManagerComponent);
-    MainUI->MinimapUI->HandleTileClicked(FIntPoint(1, 0));
-    MainUI->MinimapUI->OnAdvanceClicked();
-    TestEqual(TEXT("Movement progress exists before terminal raid end"), MainUI->MinimapUI->CurrentMoveProgress, 1);
+    for (int32 Y = 0; Y < GameMode->MapManagerComponent->MapHeight && MainUI->MinimapUI->CurrentPath.Num() == 0; ++Y)
+    {
+        for (int32 X = 0; X < GameMode->MapManagerComponent->MapWidth && MainUI->MinimapUI->CurrentPath.Num() == 0; ++X)
+        {
+            MainUI->MinimapUI->HandleTileClicked(FIntPoint(X, Y));
+        }
+    }
+    TestEqual(TEXT("Movement progress is zero before terminal raid end"), MainUI->MinimapUI->CurrentMoveProgress, 0);
     TestTrue(TEXT("A movement path exists before terminal raid end"), MainUI->MinimapUI->CurrentPath.Num() > 0);
+    MainUI->MinimapUI->OnAdvanceClicked();
 
     GameMode->FailRaid();
     TestEqual(TEXT("Failing the raid returns to the lobby"), GameMode->RaidState, ERaidState::Lobby);

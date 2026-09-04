@@ -14,6 +14,8 @@
 #include "Components/SizeBox.h"
 #include "Components/WidgetSwitcher.h"
 #include "Components/ScrollBox.h"
+#include "Components/UniformGridPanel.h"
+#include "Components/UniformGridSlot.h"
 #include "MinimapWidget.h"
 #include "GridBoardWidget.h"
 #include "DraggableItemWidget.h"
@@ -210,21 +212,26 @@ bool UMainGameUI::Initialize()
 
         TimerText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TimerText"));
         TimerText->SetText(FText::FromString(TEXT("Time: 60s")));
+        TimerText->SetVisibility(ESlateVisibility::Collapsed);
         RightPanel->AddChildToVerticalBox(TimerText);
 
         ScoreText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("ScoreText"));
         ScoreText->SetText(FText::FromString(TEXT("Score: 0 / 1000")));
+        ScoreText->SetVisibility(ESlateVisibility::Collapsed);
         RightPanel->AddChildToVerticalBox(ScoreText);
 
         HealthText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("HealthText"));
         HealthText->SetText(FText::FromString(TEXT("HP: 100 / 100")));
+        HealthText->SetVisibility(ESlateVisibility::Collapsed);
         RightPanel->AddChildToVerticalBox(HealthText);
 
         CombatText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("CombatText"));
         CombatText->SetText(FText::FromString(TEXT("Enemy: None")));
+        CombatText->SetVisibility(ESlateVisibility::Collapsed);
         RightPanel->AddChildToVerticalBox(CombatText);
 
         CombatActionText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("CombatActionText"));
+        CombatActionText->SetVisibility(ESlateVisibility::Collapsed);
         RightPanel->AddChildToVerticalBox(CombatActionText);
 
         EventLogBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("EventLogBorder"));
@@ -275,14 +282,26 @@ bool UMainGameUI::Initialize()
         PoolSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
         PoolSlot->SetHorizontalAlignment(HAlign_Left);
 
+        UUniformGridPanel* ActionGrid = WidgetTree->ConstructWidget<UUniformGridPanel>(UUniformGridPanel::StaticClass(), TEXT("ActionGrid"));
+        ActionGrid->SetSlotPadding(FMargin(2.0f));
+        UVerticalBoxSlot* ActionGridSlot = RightPanel->AddChildToVerticalBox(ActionGrid);
+        ActionGridSlot->SetPadding(FMargin(0, 6, 0, 0));
+        int32 ActionIndex = 0;
+        auto AddCompactAction = [&](UButton* Button)
+        {
+            if (Button && ActionGrid)
+            {
+                ActionGrid->AddChildToUniformGrid(Button, ActionIndex / 2, ActionIndex % 2);
+                ++ActionIndex;
+            }
+        };
+
         SearchBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SearchBtn"));
         UTextBlock* SearchBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         SearchBtnText->SetText(FText::FromString(TEXT("SEARCH CONTAINER")));
         SearchBtnText->SetColorAndOpacity(FLinearColor::Black);
         SearchBtn->AddChild(SearchBtnText);
-        UVerticalBoxSlot* SearchSlot = RightPanel->AddChildToVerticalBox(SearchBtn);
-        SearchSlot->SetPadding(FMargin(0, 10, 0, 0));
-        SearchSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        AddCompactAction(SearchBtn);
 
         StashBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("StashButton"));
         UTextBlock* StashBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -290,9 +309,7 @@ bool UMainGameUI::Initialize()
         StashBtnText->SetColorAndOpacity(FLinearColor::Black);
         StashBtn->AddChild(StashBtnText);
         StashBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnStashButtonClicked);
-        UVerticalBoxSlot* StashBtnSlot = RightPanel->AddChildToVerticalBox(StashBtn);
-        StashBtnSlot->SetPadding(FMargin(0, 10, 0, 0));
-        StashBtnSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        AddCompactAction(StashBtn);
 
         ExtractBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ExtractButton"));
         UTextBlock* ExtractBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -300,9 +317,7 @@ bool UMainGameUI::Initialize()
         ExtractBtnText->SetColorAndOpacity(FLinearColor::Black);
         ExtractBtn->AddChild(ExtractBtnText);
         ExtractBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnExtractButtonClicked);
-        UVerticalBoxSlot* ExtractBtnSlot = RightPanel->AddChildToVerticalBox(ExtractBtn);
-        ExtractBtnSlot->SetPadding(FMargin(0, 10, 0, 0));
-        ExtractBtnSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        AddCompactAction(ExtractBtn);
 
         // Sell Button
         SellBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellButton"));
@@ -311,9 +326,7 @@ bool UMainGameUI::Initialize()
         SellBtnText->SetColorAndOpacity(FLinearColor::Black);
         SellBtn->AddChild(SellBtnText);
         SellBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnSellButtonClicked);
-        UVerticalBoxSlot* SellSlot = RightPanel->AddChildToVerticalBox(SellBtn);
-        SellSlot->SetPadding(FMargin(0, 20, 0, 0));
-        SellSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        AddCompactAction(SellBtn);
 
         // Sell All Button
         SellAllBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellAllButton"));
@@ -322,9 +335,7 @@ bool UMainGameUI::Initialize()
         SellAllBtnText->SetColorAndOpacity(FLinearColor::Black);
         SellAllBtn->AddChild(SellAllBtnText);
         SellAllBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnSellAllButtonClicked);
-        UVerticalBoxSlot* SellAllSlot = RightPanel->AddChildToVerticalBox(SellAllBtn);
-        SellAllSlot->SetPadding(FMargin(0, 10, 0, 0));
-        SellAllSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        AddCompactAction(SellAllBtn);
 
         // Combat action buttons
         BangBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("BangButton"));
@@ -333,9 +344,7 @@ bool UMainGameUI::Initialize()
         BangButtonText->SetColorAndOpacity(FLinearColor::Black);
         BangBtn->AddChild(BangButtonText);
         BangBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnBangButtonClicked);
-        UVerticalBoxSlot* BangSlot = RightPanel->AddChildToVerticalBox(BangBtn);
-        BangSlot->SetPadding(FMargin(0, 10, 0, 0));
-        BangSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        AddCompactAction(BangBtn);
 
         ReloadBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ReloadButton"));
         UTextBlock* ReloadText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -343,7 +352,7 @@ bool UMainGameUI::Initialize()
         ReloadText->SetColorAndOpacity(FLinearColor::Black);
         ReloadBtn->AddChild(ReloadText);
         ReloadBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnReloadButtonClicked);
-        RightPanel->AddChildToVerticalBox(ReloadBtn);
+        AddCompactAction(ReloadBtn);
 
         PlayerAmbushBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("PlayerAmbushButton"));
         UTextBlock* PlayerAmbushText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -351,7 +360,7 @@ bool UMainGameUI::Initialize()
         PlayerAmbushText->SetColorAndOpacity(FLinearColor::Black);
         PlayerAmbushBtn->AddChild(PlayerAmbushText);
         PlayerAmbushBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnPlayerAmbushButtonClicked);
-        RightPanel->AddChildToVerticalBox(PlayerAmbushBtn);
+        AddCompactAction(PlayerAmbushBtn);
 
         auto AddAmbushButton = [&](UButton*& OutButton, const TCHAR* Name, const TCHAR* Label, const TCHAR* FunctionName)
         {
@@ -363,10 +372,7 @@ bool UMainGameUI::Initialize()
             FScriptDelegate Delegate;
             Delegate.BindUFunction(this, FunctionName);
             OutButton->OnClicked.Add(Delegate);
-            if (UVerticalBoxSlot* ButtonSlot = RightPanel->AddChildToVerticalBox(OutButton))
-            {
-                ButtonSlot->SetPadding(FMargin(0, 2, 0, 0));
-            }
+            AddCompactAction(OutButton);
         };
         AddAmbushButton(AmbushWaitBtn, TEXT("AmbushWaitButton"), TEXT("WAIT"), TEXT("OnAmbushWaitButtonClicked"));
         AddAmbushButton(AmbushCancelBtn, TEXT("AmbushCancelButton"), TEXT("CANCEL"), TEXT("OnAmbushCancelButtonClicked"));
@@ -383,10 +389,8 @@ bool UMainGameUI::Initialize()
         DebugSpawnText->SetColorAndOpacity(FLinearColor::Black);
         DebugSpawnEnemyBtn->AddChild(DebugSpawnText);
         DebugSpawnEnemyBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnDebugSpawnEnemyClicked);
-        if (UVerticalBoxSlot* DebugSlot = RightPanel->AddChildToVerticalBox(DebugSpawnEnemyBtn))
-        {
-            DebugSlot->SetPadding(FMargin(0, 6, 0, 0));
-        }
+        ActionGrid->AddChildToUniformGrid(DebugSpawnEnemyBtn, ActionIndex / 2, ActionIndex % 2);
+        ++ActionIndex;
 #endif
 
         // --- 인벤토리/장비 컴포넌트 연결 ---
@@ -511,6 +515,11 @@ void UMainGameUI::UpdateActionAvailability()
     const bool bAtExtractionPoint = bInRaid && GM->IsAtExtractionPoint();
 
     if (SearchBtn) SearchBtn->SetIsEnabled(bInRaid && !bInCombat);
+    if (StashBtn)
+    {
+        StashBtn->SetVisibility(bInRaid ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+        StashBtn->SetIsEnabled(!bInRaid);
+    }
     if (ExtractBtn) ExtractBtn->SetIsEnabled(bAtExtractionPoint && !bInCombat);
     if (SellBtn) SellBtn->SetIsEnabled(bInRaid && !bInCombat);
     if (SellAllBtn) SellAllBtn->SetIsEnabled(bInRaid && !bInCombat);

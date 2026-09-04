@@ -10,6 +10,7 @@ UEnemyManagerComponent::UEnemyManagerComponent()
     ScheduledEnemyDefinition.DisplayName = TEXT("World Scav");
     ScheduledEnemyDefinition.MaxHealth = 100;
     ScheduledEnemyDefinition.AttackDamage = 10;
+    ScheduledEnemyDefinition.DetectionPower = 60;
 }
 
 void UEnemyManagerComponent::ResetForRaid()
@@ -45,6 +46,15 @@ void UEnemyManagerComponent::AdvanceWorldTick()
         TrySpawnScheduledEnemy();
         ScheduleNextSpawn();
     }
+    EvaluateDetectionAndContact();
+    if (GameMode->CombatComponent && GameMode->CombatComponent->bHasActiveEnemy)
+    {
+        return;
+    }
+    if (AmbushReactionState != EEnemyAmbushReactionState::None)
+    {
+        return;
+    }
     AdvanceEnemyMovement();
     EvaluateDetectionAndContact();
 }
@@ -63,7 +73,7 @@ bool UEnemyManagerComponent::SpawnEnemyAt(const FEnemyDefinition& EnemyDefinitio
     NewInstance.Coordinate = Coordinate;
     NewInstance.HomeCoordinate = Coordinate;
     NewInstance.BehaviorProfile = BehaviorProfile;
-    NewInstance.NextMoveWorldTick = RaidWorldTick + 1;
+    NewInstance.NextMoveWorldTick = RaidWorldTick + 2;
 
     EnemyInstances.Add(NewInstance);
     OccupiedTiles.Add(Coordinate, NewInstance.InstanceID);
@@ -543,7 +553,7 @@ bool UEnemyManagerComponent::MoveRandomWanderEnemy(int32 EnemyIndex)
         Candidates.Add(Candidate);
     }
 
-    Instance.NextMoveWorldTick = RaidWorldTick + 1;
+    Instance.NextMoveWorldTick = RaidWorldTick + 2;
     if (Candidates.Num() == 0)
     {
         return false;

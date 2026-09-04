@@ -300,13 +300,6 @@ void UMinimapWidget::HandleTileClicked(FIntPoint ClickedCoord)
         return;
     }
 
-    if (CurrentMoveProgress > 0)
-    {
-        // 이동 도중에는 현재 경로를 끝까지 유지합니다.
-        NotifyMovementMessage(TEXT("현재 이동을 완료한 뒤 목적지를 변경할 수 있습니다."));
-        return;
-    }
-
     if (!MapManager || !AdvanceButton)
     {
         NotifyMovementMessage(TEXT("맵이 아직 준비되지 않았습니다."));
@@ -367,47 +360,34 @@ void UMinimapWidget::OnAdvanceClicked()
 
     if (CurrentPath.Num() == 0) return;
 
-    bool bWorldTickCommitted = false;
-    CurrentMoveProgress++;
-    bWorldTickCommitted = true;
-    if (CurrentMoveProgress >= 3)
+    if (!MovePlayerTo(CurrentPath[0]))
     {
-        // 3턴 경과 시 다음 칸으로 이동
         CurrentMoveProgress = 0;
-        if (!MovePlayerTo(CurrentPath[0])) // Path의 첫번째가 다음 칸
+        CurrentPath.Empty();
+        CurrentTargetCoord = CurrentPlayerCoord;
+        if (AdvanceButton)
         {
-            bWorldTickCommitted = false;
-            CurrentPath.Empty();
-            CurrentTargetCoord = CurrentPlayerCoord;
-            if (AdvanceButton)
-            {
-                AdvanceButton->SetVisibility(ESlateVisibility::Visible);
-                AdvanceButton->SetIsEnabled(false);
-            }
-            UpdatePathHighlight();
-            UpdateAdvanceButtonText();
-            NotifyMovementMessage(TEXT("이동 경로가 막혀 목적지를 다시 선택해야 합니다."));
-            PublishMovementState();
-            return;
-        }
-        CurrentPath.RemoveAt(0);
-
-        if (CurrentPath.Num() == 0)
-        {
-            // 최종 도착
             AdvanceButton->SetVisibility(ESlateVisibility::Visible);
             AdvanceButton->SetIsEnabled(false);
         }
         UpdatePathHighlight();
+        UpdateAdvanceButtonText();
+        NotifyMovementMessage(TEXT("이동 경로가 막혀 목적지를 다시 선택해야 합니다."));
+        PublishMovementState();
+        return;
     }
-    
-    UpdateAdvanceButtonText();
-    PublishMovementState();
 
-    if (bWorldTickCommitted)
+    CurrentMoveProgress = 0;
+    CurrentPath.RemoveAt(0);
+    if (CurrentPath.Num() == 0)
     {
-        GM->AdvanceRaidWorldTick();
+        AdvanceButton->SetVisibility(ESlateVisibility::Visible);
+        AdvanceButton->SetIsEnabled(false);
     }
+    UpdateAdvanceButtonText();
+    UpdatePathHighlight();
+    PublishMovementState();
+    GM->AdvanceRaidWorldTick();
 }
 
 void UMinimapWidget::UpdateAdvanceButtonText()
@@ -416,7 +396,7 @@ void UMinimapWidget::UpdateAdvanceButtonText()
     {
         const FString TextStr = CurrentPath.Num() == 0
             ? TEXT("목적지 선택 후 전진")
-            : FString::Printf(TEXT("전진 (%d/3)"), CurrentMoveProgress);
+            : TEXT("전진");
         AdvanceText->SetText(FText::FromString(TextStr));
     }
 }

@@ -247,6 +247,54 @@ bool FGridLootMasterEnemyWorldDebugSpawnTest::RunTest(const FString& Parameters)
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterEnemyWorldDefaultScavContactTest,
+    "GridLootMaster.EnemyWorld.DefaultScavContactAtAdjacentTile",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterEnemyWorldDefaultScavContactTest::RunTest(const FString& Parameters)
+{
+    AGridGameMode* GameMode = NewObject<AGridGameMode>();
+    TestNotNull(TEXT("Game mode is created for default Scav contact"), GameMode);
+    if (!GameMode || !GameMode->EnemyManagerComponent || !GameMode->MapManagerComponent)
+    {
+        return false;
+    }
+
+    GameMode->MapManagerComponent->InitializeMap();
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->CurrentPlayerCoord = FIntPoint(0, 0);
+    GameMode->PlayerStealth = 50;
+    GameMode->PlayerDetectionPower = -100;
+    GameMode->PlayerPerception = 0;
+    GameMode->EnemyManagerComponent->ResetForRaid();
+
+    const FEnemyDefinition DefaultScav = GameMode->EnemyManagerComponent->ScheduledEnemyDefinition;
+    TestEqual(TEXT("Default World Scav uses the QA contact power"), DefaultScav.DetectionPower, 60);
+    TestTrue(TEXT("Adjacent default Scav can be spawned"),
+        GameMode->EnemyManagerComponent->SpawnEnemyAt(DefaultScav, FIntPoint(1, 0)));
+    GameMode->AdvanceRaidWorldTick();
+    TestTrue(TEXT("Adjacent LOS default Scav starts combat before it can move"),
+        GameMode->CombatComponent && GameMode->CombatComponent->bHasActiveEnemy);
+    TestEqual(TEXT("Pre-move contact leaves the enemy on the adjacent tile"),
+        GameMode->EnemyManagerComponent->GetEnemyInstances()[0].Coordinate, FIntPoint(1, 0));
+
+    AGridGameMode* DistantGameMode = NewObject<AGridGameMode>();
+    DistantGameMode->MapManagerComponent->InitializeMap();
+    DistantGameMode->RaidState = ERaidState::InRaid;
+    DistantGameMode->CurrentPlayerCoord = FIntPoint(0, 0);
+    DistantGameMode->PlayerStealth = 50;
+    DistantGameMode->PlayerDetectionPower = -100;
+    DistantGameMode->EnemyManagerComponent->ResetForRaid();
+    TestTrue(TEXT("Distance two default Scav can be spawned"),
+        DistantGameMode->EnemyManagerComponent->SpawnEnemyAt(
+            DistantGameMode->EnemyManagerComponent->ScheduledEnemyDefinition, FIntPoint(2, 0)));
+    DistantGameMode->AdvanceRaidWorldTick();
+    TestFalse(TEXT("Distance two default Scav does not auto-contact"),
+        DistantGameMode->CombatComponent->bHasActiveEnemy);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FGridLootMasterEnemyWorldRandomWanderTest,
     "GridLootMaster.EnemyWorld.RandomWander",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
@@ -278,15 +326,20 @@ bool FGridLootMasterEnemyWorldRandomWanderTest::RunTest(const FString& Parameter
         EnemyManager->SpawnEnemyAt(Enemy, InitialCoordinate));
 
     GameMode->AdvanceRaidWorldTick();
-    TestEqual(TEXT("The wander enemy remains registered after its move tick"),
+    TestEqual(TEXT("The wander enemy remains registered after its first world tick"),
         EnemyManager->GetEnemyInstances().Num(), 1);
+
+    TestEqual(TEXT("The wander enemy waits for its second world tick"),
+        EnemyManager->GetEnemyInstances()[0].Coordinate, InitialCoordinate);
+
+    GameMode->AdvanceRaidWorldTick();
 
     if (EnemyManager->GetEnemyInstances().Num() == 1)
     {
         const FEnemyWorldInstance& Instance = EnemyManager->GetEnemyInstances()[0];
         const int32 ManhattanDistance = FMath::Abs(Instance.Coordinate.X - InitialCoordinate.X) +
             FMath::Abs(Instance.Coordinate.Y - InitialCoordinate.Y);
-        TestTrue(TEXT("Random wander moves at most one tile"), ManhattanDistance <= 1);
+        TestTrue(TEXT("Random wander moves at most one tile after two ticks"), ManhattanDistance <= 1);
         TestTrue(TEXT("Random wander selects a reachable neighbor"),
             Instance.Coordinate == InitialCoordinate ||
             GameMode->MapManagerComponent->CanMoveBetween(InitialCoordinate, Instance.Coordinate));

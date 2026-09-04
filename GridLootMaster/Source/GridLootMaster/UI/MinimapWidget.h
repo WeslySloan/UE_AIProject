@@ -47,7 +47,7 @@ public:
 
     bool bCompactMode = false;
 
-    int32 CurrentMoveProgress; // 0, 1, 2 (3번 누르면 도착)
+    int32 CurrentMoveProgress = 0; // v1에서는 한 번의 전진이 한 칸 이동
 
     void InitMinimap(UMapManagerComponent* InMapManager, bool bInCompactMode = false);
     void SetMovementStateMirror(UMinimapWidget* InMirror);
