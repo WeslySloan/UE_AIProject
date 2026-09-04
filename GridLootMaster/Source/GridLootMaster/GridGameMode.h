@@ -147,6 +147,9 @@ public:
     bool RequestAmbushWait();
 
     UFUNCTION(BlueprintCallable, Category = "Raid|Ambush")
+    bool RequestAmbushCancel();
+
+    UFUNCTION(BlueprintCallable, Category = "Raid|Ambush")
     bool RequestAmbushLetPass();
 
     UFUNCTION(BlueprintCallable, Category = "Raid|Ambush")

@@ -21,6 +21,7 @@
 #include "../GridInventoryComponent.h"
 #include "../EquipmentComponent.h"
 #include "../CombatComponent.h"
+#include "../EnemyManagerComponent.h"
 #include "../Map/MapManagerComponent.h"
 #include "../ItemInstance.h"
 #include "Kismet/GameplayStatics.h"
@@ -222,6 +223,9 @@ bool UMainGameUI::Initialize()
         CombatText->SetText(FText::FromString(TEXT("Enemy: None")));
         RightPanel->AddChildToVerticalBox(CombatText);
 
+        CombatActionText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("CombatActionText"));
+        RightPanel->AddChildToVerticalBox(CombatActionText);
+
         UBorder* Spacer1 = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
         Spacer1->SetBrushColor(FLinearColor::Transparent);
         UVerticalBoxSlot* SpacerSlot1 = RightPanel->AddChildToVerticalBox(Spacer1);
@@ -288,16 +292,52 @@ bool UMainGameUI::Initialize()
         SellAllSlot->SetPadding(FMargin(0, 10, 0, 0));
         SellAllSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
 
-        // Bang (Shoot) Button
+        // Combat action buttons
         BangBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("BangButton"));
-        UTextBlock* BangBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-        BangBtnText->SetText(FText::FromString(TEXT("BANG!")));
-        BangBtnText->SetColorAndOpacity(FLinearColor::Black);
-        BangBtn->AddChild(BangBtnText);
+        BangButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        BangButtonText->SetText(FText::FromString(TEXT("FIRE")));
+        BangButtonText->SetColorAndOpacity(FLinearColor::Black);
+        BangBtn->AddChild(BangButtonText);
         BangBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnBangButtonClicked);
         UVerticalBoxSlot* BangSlot = RightPanel->AddChildToVerticalBox(BangBtn);
         BangSlot->SetPadding(FMargin(0, 10, 0, 0));
         BangSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+
+        ReloadBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ReloadButton"));
+        UTextBlock* ReloadText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        ReloadText->SetText(FText::FromString(TEXT("RELOAD")));
+        ReloadText->SetColorAndOpacity(FLinearColor::Black);
+        ReloadBtn->AddChild(ReloadText);
+        ReloadBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnReloadButtonClicked);
+        RightPanel->AddChildToVerticalBox(ReloadBtn);
+
+        PlayerAmbushBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("PlayerAmbushButton"));
+        UTextBlock* PlayerAmbushText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        PlayerAmbushText->SetText(FText::FromString(TEXT("AMBUSH")));
+        PlayerAmbushText->SetColorAndOpacity(FLinearColor::Black);
+        PlayerAmbushBtn->AddChild(PlayerAmbushText);
+        PlayerAmbushBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnPlayerAmbushButtonClicked);
+        RightPanel->AddChildToVerticalBox(PlayerAmbushBtn);
+
+        auto AddAmbushButton = [&](UButton*& OutButton, const TCHAR* Name, const TCHAR* Label, const TCHAR* FunctionName)
+        {
+            OutButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+            UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+            Text->SetText(FText::FromString(Label));
+            Text->SetColorAndOpacity(FLinearColor::Black);
+            OutButton->AddChild(Text);
+            FScriptDelegate Delegate;
+            Delegate.BindUFunction(this, FunctionName);
+            OutButton->OnClicked.Add(Delegate);
+            RightPanel->AddChildToVerticalBox(OutButton);
+        };
+        AddAmbushButton(AmbushWaitBtn, TEXT("AmbushWaitButton"), TEXT("WAIT"), TEXT("OnAmbushWaitButtonClicked"));
+        AddAmbushButton(AmbushCancelBtn, TEXT("AmbushCancelButton"), TEXT("CANCEL"), TEXT("OnAmbushCancelButtonClicked"));
+        AddAmbushButton(AmbushLetPassBtn, TEXT("AmbushLetPassButton"), TEXT("LET PASS"), TEXT("OnAmbushLetPassButtonClicked"));
+        AddAmbushButton(AmbushAssaultBtn, TEXT("AmbushAssaultButton"), TEXT("ASSAULT"), TEXT("OnAmbushAssaultButtonClicked"));
+        AddAmbushButton(EnemyAmbushSearchBtn, TEXT("EnemyAmbushSearchButton"), TEXT("SEARCH"), TEXT("OnEnemyAmbushSearchButtonClicked"));
+        AddAmbushButton(EnemyAmbushCoverBtn, TEXT("EnemyAmbushCoverButton"), TEXT("COVER"), TEXT("OnEnemyAmbushCoverButtonClicked"));
+        AddAmbushButton(EnemyAmbushFleeBtn, TEXT("EnemyAmbushFleeButton"), TEXT("FLEE"), TEXT("OnEnemyAmbushFleeButtonClicked"));
 
         // --- 인벤토리/장비 컴포넌트 연결 ---
         if (GM)
@@ -412,6 +452,11 @@ void UMainGameUI::UpdateActionAvailability()
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
     const bool bInRaid = GM && GM->RaidState == ERaidState::InRaid;
     const bool bInCombat = bInRaid && GM->CombatComponent && GM->CombatComponent->bHasActiveEnemy;
+    const bool bPlayerAmbushing = bInRaid && GM->PlayerPosture == EPlayerRaidPosture::Ambushing;
+    const bool bEnemyAmbush = bInRaid && GM->EnemyManagerComponent && GM->EnemyManagerComponent->HasActiveAmbushReaction();
+    FName AmbushTargetID = NAME_None;
+    const bool bHasAmbushTarget = bPlayerAmbushing && GM->EnemyManagerComponent &&
+        GM->EnemyManagerComponent->FindPlayerAmbushTarget(AmbushTargetID);
     const bool bAtExtractionPoint = bInRaid && GM->IsAtExtractionPoint();
 
     if (SearchBtn) SearchBtn->SetIsEnabled(bInRaid && !bInCombat);
@@ -419,6 +464,20 @@ void UMainGameUI::UpdateActionAvailability()
     if (SellBtn) SellBtn->SetIsEnabled(bInRaid && !bInCombat);
     if (SellAllBtn) SellAllBtn->SetIsEnabled(bInRaid && !bInCombat);
     if (BangBtn) BangBtn->SetIsEnabled(bInCombat);
+    if (ReloadBtn) ReloadBtn->SetIsEnabled(bInRaid && !bEnemyAmbush);
+    if (PlayerAmbushBtn)
+    {
+        PlayerAmbushBtn->SetVisibility(bInRaid && !bInCombat && !bPlayerAmbushing && !bEnemyAmbush
+            ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+        PlayerAmbushBtn->SetIsEnabled(bInRaid && !bInCombat && !bEnemyAmbush);
+    }
+    if (AmbushWaitBtn) AmbushWaitBtn->SetVisibility(bPlayerAmbushing ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    if (AmbushCancelBtn) AmbushCancelBtn->SetVisibility(bPlayerAmbushing ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    if (AmbushLetPassBtn) AmbushLetPassBtn->SetVisibility(bHasAmbushTarget ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    if (AmbushAssaultBtn) AmbushAssaultBtn->SetVisibility(bHasAmbushTarget ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    if (EnemyAmbushSearchBtn) EnemyAmbushSearchBtn->SetVisibility(bEnemyAmbush ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    if (EnemyAmbushCoverBtn) EnemyAmbushCoverBtn->SetVisibility(bEnemyAmbush ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    if (EnemyAmbushFleeBtn) EnemyAmbushFleeBtn->SetVisibility(bEnemyAmbush ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
     if (MinimapUI && MinimapUI->AdvanceButton)
     {
         MinimapUI->AdvanceButton->SetIsEnabled(bInRaid && !bInCombat && MinimapUI->CurrentPath.Num() > 0);
@@ -514,7 +573,11 @@ FReply UMainGameUI::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent
     {
         if (GM && GM->CombatComponent)
         {
-            GM->CombatComponent->RequestWeaponSwap(TEXT("Primary1"));
+            if (!GM->CombatComponent->RequestWeaponSwap(TEXT("Primary1")) &&
+                !GM->CombatComponent->LastCombatMessage.IsEmpty())
+            {
+                QueueEventNotification(GM->CombatComponent->LastCombatMessage);
+            }
         }
         return FReply::Handled();
     }
@@ -522,7 +585,11 @@ FReply UMainGameUI::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent
     {
         if (GM && GM->CombatComponent)
         {
-            GM->CombatComponent->RequestWeaponSwap(TEXT("Primary2"));
+            if (!GM->CombatComponent->RequestWeaponSwap(TEXT("Primary2")) &&
+                !GM->CombatComponent->LastCombatMessage.IsEmpty())
+            {
+                QueueEventNotification(GM->CombatComponent->LastCombatMessage);
+            }
         }
         return FReply::Handled();
     }
@@ -539,6 +606,12 @@ FReply UMainGameUI::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent
         return FReply::Handled();
     }
     return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+}
+
+void UMainGameUI::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+    Super::NativeTick(MyGeometry, InDeltaTime);
+    UpdateCombatUI();
 }
 
 void UMainGameUI::UpdateScore(int32 NewScore)
@@ -582,6 +655,25 @@ void UMainGameUI::UpdateCombatUI()
         if (WeaponSlot2) WeaponSlot2->SetHighlight(ActiveWeaponSlot == TEXT("Primary2"));
     }
 
+    if (CombatActionText && GM && GM->CombatComponent)
+    {
+        FString ActionText = TEXT("READY");
+        if (GM->CombatComponent->PlayerActionState == ECombatPlayerActionState::Swapping)
+        {
+            ActionText = FString::Printf(TEXT("SWAPPING %.1fs"), GM->CombatComponent->PlayerActionTimeRemaining);
+        }
+        else if (GM->CombatComponent->PlayerActionState == ECombatPlayerActionState::Reloading)
+        {
+            ActionText = FString::Printf(TEXT("RELOADING %.1fs"), GM->CombatComponent->PlayerActionTimeRemaining);
+        }
+        else if (GM->CombatComponent->PlayerAttackCooldownRemaining > KINDA_SMALL_NUMBER)
+        {
+            ActionText = FString::Printf(TEXT("COOLDOWN %.1fs"), GM->CombatComponent->PlayerAttackCooldownRemaining);
+        }
+        ActionText += FString::Printf(TEXT("\nRECOIL %.0f"), GM->CombatComponent->CurrentRecoil);
+        CombatActionText->SetText(FText::FromString(ActionText));
+    }
+
     if (!CombatText) return;
 
     if (!GM || !GM->CombatComponent || GM->RaidState != ERaidState::InRaid ||
@@ -590,19 +682,62 @@ void UMainGameUI::UpdateCombatUI()
         const FString Message = GM && GM->CombatComponent && GM->RaidState == ERaidState::InRaid
             ? GM->CombatComponent->LastCombatMessage
             : TEXT("");
-        CombatText->SetText(FText::FromString(Message.IsEmpty() ? TEXT("Enemy: None") : FString::Printf(TEXT("Enemy: None\n%s"), *Message)));
-        QueueEventNotification(Message);
+        FString StatusText = TEXT("Enemy: None");
+        if (GM && GM->RaidState == ERaidState::InRaid)
+        {
+            if (GM->EnemyManagerComponent && GM->EnemyManagerComponent->HasActiveAmbushReaction())
+            {
+                StatusText = TEXT("AMBUSHED\nSEARCH / COVER / FLEE");
+            }
+            else if (GM->PlayerPosture == EPlayerRaidPosture::Ambushing)
+            {
+                FName AmbushTargetID = NAME_None;
+                StatusText = GM->EnemyManagerComponent &&
+                    GM->EnemyManagerComponent->FindPlayerAmbushTarget(AmbushTargetID)
+                    ? TEXT("AMBUSHING\nLET PASS / ASSAULT") : TEXT("AMBUSHING\nWAIT");
+            }
+        }
+        CombatText->SetText(FText::FromString(Message.IsEmpty() ? StatusText : FString::Printf(TEXT("%s\n%s"), *StatusText, *Message)));
+        if (!Message.IsEmpty() && Message != LastDisplayedCombatMessage)
+        {
+            LastDisplayedCombatMessage = Message;
+            QueueEventNotification(Message);
+        }
         return;
     }
 
     const FEnemyInstanceData& Enemy = GM->CombatComponent->CurrentEnemy;
+    int32 Distance = -1;
+    FIntPoint EnemyCoordinate;
+    if (GM->EnemyManagerComponent && GM->MapManagerComponent &&
+        GM->EnemyManagerComponent->GetActiveEnemyCoordinate(EnemyCoordinate))
+    {
+        Distance = GM->MapManagerComponent->GetTileDistance(GM->CurrentPlayerCoord, EnemyCoordinate);
+    }
     const FString StateText = GM->CombatComponent->bHasActiveEnemy ?
-        FString::Printf(TEXT("HP: %d / %d"), Enemy.CurrentHealth, Enemy.Definition.MaxHealth) :
+        FString::Printf(TEXT("HP: %d / %d | Distance: %d tiles"), Enemy.CurrentHealth, Enemy.Definition.MaxHealth, Distance) :
         TEXT("DEFEATED");
     const FString Message = GM->CombatComponent->LastCombatMessage;
-    const FString CombatStatus = FString::Printf(TEXT("Enemy: %s (%s)"), *Enemy.Definition.DisplayName, *StateText);
+    UItemInstance* ActiveWeapon = GM->EquipmentComponent
+        ? GM->EquipmentComponent->GetEquippedItem(GM->CombatComponent->ActiveWeaponSlot) : nullptr;
+    const FString WeaponText = ActiveWeapon
+        ? ActiveWeapon->WeaponAttackType == EWeaponAttackType::Firearm && ActiveWeapon->EquippedMagazine
+            ? FString::Printf(TEXT("%s | %d / %d"), *ActiveWeapon->ItemName,
+                ActiveWeapon->EquippedMagazine->CurrentAmmo, ActiveWeapon->EquippedMagazine->MaxAmmo)
+            : ActiveWeapon->ItemName
+        : TEXT("No weapon");
+    if (BangButtonText)
+    {
+        BangButtonText->SetText(FText::FromString(ActiveWeapon &&
+            ActiveWeapon->WeaponAttackType == EWeaponAttackType::Melee ? TEXT("ATTACK") : TEXT("FIRE")));
+    }
+    const FString CombatStatus = FString::Printf(TEXT("Enemy: %s (%s)\nWeapon: %s"), *Enemy.Definition.DisplayName, *StateText, *WeaponText);
     CombatText->SetText(FText::FromString(Message.IsEmpty() ? CombatStatus : FString::Printf(TEXT("%s\n%s"), *CombatStatus, *Message)));
-    QueueEventNotification(Message);
+    if (!Message.IsEmpty() && Message != LastDisplayedCombatMessage)
+    {
+        LastDisplayedCombatMessage = Message;
+        QueueEventNotification(Message);
+    }
 }
 
 void UMainGameUI::ShowEventNotification(FString Message)
@@ -692,6 +827,12 @@ void UMainGameUI::ShowGameResult(bool bIsWin)
 void UMainGameUI::OnSellButtonClicked()
 {
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GM && (GM->PlayerPosture == EPlayerRaidPosture::Ambushing ||
+        (GM->EnemyManagerComponent && GM->EnemyManagerComponent->HasActiveAmbushReaction())))
+    {
+        QueueEventNotification(TEXT("매복 중에는 판매할 수 없습니다."));
+        return;
+    }
     if (GM && GM->RaidState == ERaidState::InRaid && GM->InventoryComponent && GM->ItemDataTable)
     {
         int32 TotalValue = 0;
@@ -726,6 +867,13 @@ void UMainGameUI::OnSellAllButtonClicked()
 {
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
     if (!GM || GM->RaidState != ERaidState::InRaid || !GM->ItemDataTable) return;
+
+    if (GM->PlayerPosture == EPlayerRaidPosture::Ambushing ||
+        (GM->EnemyManagerComponent && GM->EnemyManagerComponent->HasActiveAmbushReaction()))
+    {
+        QueueEventNotification(TEXT("매복 중에는 판매할 수 없습니다."));
+        return;
+    }
 
     int32 TotalValue = 0;
     auto SellGrid = [&](UGridInventoryComponent* Inv) {
@@ -848,4 +996,62 @@ void UMainGameUI::OnBangButtonClicked()
     // UI 갱신
     if (ActiveWeaponSlot == TEXT("Primary1") && WeaponSlot1) WeaponSlot1->RefreshSlotUI();
     else if (ActiveWeaponSlot == TEXT("Primary2") && WeaponSlot2) WeaponSlot2->RefreshSlotUI();
+}
+
+void UMainGameUI::OnReloadButtonClicked()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GM && GM->CombatComponent && !GM->CombatComponent->RequestReload() &&
+        !GM->CombatComponent->LastCombatMessage.IsEmpty())
+    {
+        QueueEventNotification(GM->CombatComponent->LastCombatMessage);
+    }
+}
+
+void UMainGameUI::OnPlayerAmbushButtonClicked()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GM && !GM->RequestPlayerAmbush()) QueueEventNotification(TEXT("AMBUSH를 시작할 수 없습니다."));
+}
+
+void UMainGameUI::OnAmbushWaitButtonClicked()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GM && !GM->RequestAmbushWait()) QueueEventNotification(TEXT("AMBUSH 대기 요청이 거부되었습니다."));
+}
+
+void UMainGameUI::OnAmbushCancelButtonClicked()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GM && !GM->RequestAmbushCancel()) QueueEventNotification(TEXT("AMBUSH 취소 요청이 거부되었습니다."));
+}
+
+void UMainGameUI::OnAmbushLetPassButtonClicked()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GM && !GM->RequestAmbushLetPass()) QueueEventNotification(TEXT("LET PASS 요청이 거부되었습니다."));
+}
+
+void UMainGameUI::OnAmbushAssaultButtonClicked()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GM && !GM->RequestAmbushAssault()) QueueEventNotification(TEXT("ASSAULT 요청이 거부되었습니다."));
+}
+
+void UMainGameUI::OnEnemyAmbushSearchButtonClicked()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GM && !GM->RequestAmbushSearch()) QueueEventNotification(TEXT("SEARCH 요청이 거부되었습니다."));
+}
+
+void UMainGameUI::OnEnemyAmbushCoverButtonClicked()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GM && !GM->RequestAmbushCover()) QueueEventNotification(TEXT("COVER 요청이 거부되었습니다."));
+}
+
+void UMainGameUI::OnEnemyAmbushFleeButtonClicked()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (GM && !GM->RequestAmbushFlee()) QueueEventNotification(TEXT("FLEE 요청이 거부되었습니다."));
 }

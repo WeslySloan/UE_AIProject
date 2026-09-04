@@ -19,6 +19,7 @@ public:
     void RefreshMinimaps(class UMapManagerComponent* InMapManager);
 
     virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+    virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
     virtual bool NativeSupportsKeyboardFocus() const override { return true; }
 
     UFUNCTION()
@@ -56,6 +57,24 @@ public:
 
     UFUNCTION()
     void OnBangButtonClicked();
+    UFUNCTION()
+    void OnReloadButtonClicked();
+    UFUNCTION()
+    void OnPlayerAmbushButtonClicked();
+    UFUNCTION()
+    void OnAmbushWaitButtonClicked();
+    UFUNCTION()
+    void OnAmbushCancelButtonClicked();
+    UFUNCTION()
+    void OnAmbushLetPassButtonClicked();
+    UFUNCTION()
+    void OnAmbushAssaultButtonClicked();
+    UFUNCTION()
+    void OnEnemyAmbushSearchButtonClicked();
+    UFUNCTION()
+    void OnEnemyAmbushCoverButtonClicked();
+    UFUNCTION()
+    void OnEnemyAmbushFleeButtonClicked();
 
     UFUNCTION()
     void OnToggleModeClicked();
@@ -98,6 +117,9 @@ public:
     UTextBlock* CombatText;
 
     UPROPERTY()
+    UTextBlock* CombatActionText;
+
+    UPROPERTY()
     UTextBlock* EventNotificationText;
 
     UPROPERTY()
@@ -105,6 +127,9 @@ public:
 
     UPROPERTY()
     TArray<FString> PendingEventNotifications;
+
+    UPROPERTY()
+    FString LastDisplayedCombatMessage;
 
     // 기존의 UWrapBox 대신 새로운 루트 컨테이너용 그리드 보드 사용
     UPROPERTY()
@@ -164,6 +189,36 @@ public:
 
     UPROPERTY()
     class UButton* BangBtn;
+
+    UPROPERTY()
+    UTextBlock* BangButtonText;
+
+    UPROPERTY()
+    class UButton* ReloadBtn;
+
+    UPROPERTY()
+    class UButton* PlayerAmbushBtn;
+
+    UPROPERTY()
+    class UButton* AmbushWaitBtn;
+
+    UPROPERTY()
+    class UButton* AmbushCancelBtn;
+
+    UPROPERTY()
+    class UButton* AmbushLetPassBtn;
+
+    UPROPERTY()
+    class UButton* AmbushAssaultBtn;
+
+    UPROPERTY()
+    class UButton* EnemyAmbushSearchBtn;
+
+    UPROPERTY()
+    class UButton* EnemyAmbushCoverBtn;
+
+    UPROPERTY()
+    class UButton* EnemyAmbushFleeBtn;
 
     UPROPERTY()
     class UButton* StartRaidBtn;

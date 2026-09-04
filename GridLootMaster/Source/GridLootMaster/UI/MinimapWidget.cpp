@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "../GridGameMode.h"
 #include "../CombatComponent.h"
+#include "../EnemyManagerComponent.h"
 #include "Input/Reply.h"
 
 void UMinimapWidget::NativeConstruct()
@@ -247,7 +248,9 @@ void UMinimapWidget::HandleTileClicked(FIntPoint ClickedCoord)
         GM = Cast<AGridGameMode>(World->GetAuthGameMode());
     }
     if (!GM || GM->RaidState != ERaidState::InRaid ||
-        (GM->CombatComponent && GM->CombatComponent->bHasActiveEnemy))
+        (GM->CombatComponent && GM->CombatComponent->bHasActiveEnemy) ||
+        GM->PlayerPosture == EPlayerRaidPosture::Ambushing ||
+        (GM->EnemyManagerComponent && GM->EnemyManagerComponent->HasActiveAmbushReaction()))
     {
         NotifyMovementMessage(!GM
             ? TEXT("레이드 상태를 확인할 수 없습니다.")
@@ -303,6 +306,19 @@ void UMinimapWidget::NotifyMovementMessage(const FString& Message)
 
 void UMinimapWidget::OnAdvanceClicked()
 {
+    AGridGameMode* GM = nullptr;
+    if (UWorld* World = GetWorld())
+    {
+        GM = Cast<AGridGameMode>(World->GetAuthGameMode());
+    }
+    if (!GM || GM->RaidState != ERaidState::InRaid ||
+        (GM->CombatComponent && GM->CombatComponent->bHasActiveEnemy) ||
+        GM->PlayerPosture == EPlayerRaidPosture::Ambushing ||
+        (GM->EnemyManagerComponent && GM->EnemyManagerComponent->HasActiveAmbushReaction()))
+    {
+        return;
+    }
+
     if (MovementStateSource)
     {
         MovementStateSource->OnAdvanceClicked();
@@ -310,17 +326,6 @@ void UMinimapWidget::OnAdvanceClicked()
     }
 
     if (CurrentPath.Num() == 0) return;
-
-    AGridGameMode* GM = nullptr;
-    if (UWorld* World = GetWorld())
-    {
-        GM = Cast<AGridGameMode>(World->GetAuthGameMode());
-    }
-    if (!GM || GM->RaidState != ERaidState::InRaid ||
-        (GM->CombatComponent && GM->CombatComponent->bHasActiveEnemy))
-    {
-        return;
-    }
 
     bool bWorldTickCommitted = false;
     CurrentMoveProgress++;

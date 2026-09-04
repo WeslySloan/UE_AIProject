@@ -322,7 +322,8 @@ bool UEnemyManagerComponent::RequestAmbushCover()
     {
         if (Instance.InstanceID == ActiveAmbushInstanceID && Instance.bAlive)
         {
-            return ResolveAmbushAttack((100.0f - GetCoverValueAt(Instance.Coordinate)) / 100.0f);
+            AGridGameMode* GameMode = Cast<AGridGameMode>(GetOwner());
+            return ResolveAmbushAttack((100.0f - GetCoverValueAt(GameMode->CurrentPlayerCoord)) / 100.0f);
         }
     }
     return false;

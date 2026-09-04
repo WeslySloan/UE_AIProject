@@ -172,6 +172,14 @@ bool UCombatComponent::RequestWeaponSwap(FName TargetSlot)
         return false;
     }
 
+    if (GM->PlayerPosture == EPlayerRaidPosture::Ambushing ||
+        (GM->EnemyManagerComponent && GM->EnemyManagerComponent->HasActiveAmbushReaction()))
+    {
+        LastCombatMessage = TEXT("매복 중에는 무기를 교체할 수 없습니다.");
+        OnCombatStateChanged.Broadcast();
+        return false;
+    }
+
     if (TargetSlot == ActiveWeaponSlot)
     {
         return false;
@@ -224,6 +232,14 @@ bool UCombatComponent::RequestReload(FName WeaponSlot)
     if (!GM || GM->RaidState != ERaidState::InRaid || !GM->EquipmentComponent ||
         !GM->InventoryComponent || PlayerActionState != ECombatPlayerActionState::None)
     {
+        return false;
+    }
+
+    if (GM->PlayerPosture == EPlayerRaidPosture::Ambushing ||
+        (GM->EnemyManagerComponent && GM->EnemyManagerComponent->HasActiveAmbushReaction()))
+    {
+        LastCombatMessage = TEXT("매복 중에는 재장전할 수 없습니다.");
+        OnCombatStateChanged.Broadcast();
         return false;
     }
 

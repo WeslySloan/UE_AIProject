@@ -455,6 +455,14 @@ bool FGridLootMasterPlayerAmbushFlowTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("Waiting keeps the player in ambushing posture"),
         GameMode->PlayerPosture, EPlayerRaidPosture::Ambushing);
 
+    const FIntPoint AmbushCoord = GameMode->CurrentPlayerCoord;
+    GameMode->HandlePlayerMoved(FIntPoint(1, 0));
+    TestEqual(TEXT("Player movement is blocked while ambushing"), GameMode->CurrentPlayerCoord, AmbushCoord);
+    TestTrue(TEXT("Ambush cancel is accepted"), GameMode->RequestAmbushCancel());
+    TestEqual(TEXT("Ambush cancel restores normal posture"),
+        GameMode->PlayerPosture, EPlayerRaidPosture::Normal);
+    TestTrue(TEXT("Player ambush can be started again after cancel"), GameMode->RequestPlayerAmbush());
+
     TestTrue(TEXT("Ambush assault starts a player-initiated contact"),
         GameMode->RequestAmbushAssault());
     TestTrue(TEXT("Ambush assault starts combat"), GameMode->CombatComponent->bHasActiveEnemy);
@@ -629,6 +637,9 @@ bool FGridLootMasterEnemyAmbushReactionTest::RunTest(const FString& Parameters)
     GameMode->AdvanceRaidWorldTick();
     TestTrue(TEXT("Ambush reaction waits for player choice"), EnemyManager->HasActiveAmbushReaction());
     TestFalse(TEXT("Ambush reaction does not start combat immediately"), GameMode->CombatComponent->bHasActiveEnemy);
+    const FIntPoint ReactionCoord = GameMode->CurrentPlayerCoord;
+    GameMode->HandlePlayerMoved(FIntPoint(1, 0));
+    TestEqual(TEXT("Movement is blocked during enemy ambush reaction"), GameMode->CurrentPlayerCoord, ReactionCoord);
     const int32 ReactionTick = EnemyManager->RaidWorldTick;
     GameMode->AdvanceRaidWorldTick();
     TestEqual(TEXT("World tick stops during ambush reaction"), EnemyManager->RaidWorldTick, ReactionTick);
@@ -691,13 +702,14 @@ bool FGridLootMasterEnemyAmbushCoverTest::RunTest(const FString& Parameters)
     Ambusher.VisionRangeTiles = 0;
     Ambusher.DetectionPower = 0;
     const int32 StartingHealth = GameMode->MaxHealth;
-    auto TestCoverDamage = [&](FIntPoint Coordinate, int32 ExpectedDamage)
+    auto TestCoverDamage = [&](FIntPoint PlayerCoordinate, FIntPoint EnemyCoordinate, int32 ExpectedDamage)
     {
         GameMode->CombatComponent->ClearEnemy();
         GameMode->EnemyManagerComponent->ResetForRaid();
         GameMode->CurrentHealth = StartingHealth;
+        GameMode->CurrentPlayerCoord = PlayerCoordinate;
         TestTrue(TEXT("Cover test Ambusher is spawned"),
-            GameMode->EnemyManagerComponent->SpawnEnemyAt(Ambusher, Coordinate, EEnemyBehaviorProfile::Ambusher));
+            GameMode->EnemyManagerComponent->SpawnEnemyAt(Ambusher, EnemyCoordinate, EEnemyBehaviorProfile::Ambusher));
         GameMode->AdvanceRaidWorldTick();
         TestTrue(TEXT("Cover test enters ambush reaction"), GameMode->EnemyManagerComponent->HasActiveAmbushReaction());
         TestTrue(TEXT("COVER applies the MapCover damage tier"), GameMode->RequestAmbushCover());
@@ -705,8 +717,8 @@ bool FGridLootMasterEnemyAmbushCoverTest::RunTest(const FString& Parameters)
             StartingHealth - GameMode->CurrentHealth, ExpectedDamage);
     };
 
-    TestCoverDamage(FIntPoint(0, 1), 75);
-    TestCoverDamage(FIntPoint(1, 1), 50);
+    TestCoverDamage(FIntPoint(0, 1), FIntPoint(0, 2), 75);
+    TestCoverDamage(FIntPoint(1, 1), FIntPoint(1, 2), 50);
     return true;
 }
 

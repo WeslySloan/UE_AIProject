@@ -225,7 +225,9 @@ FName AGridGameMode::MakeUniqueInstanceID(FName PreferredID) const
 
 void AGridGameMode::HandlePlayerMoved(FIntPoint NewCoordinate)
 {
-    if (RaidState != ERaidState::InRaid || !CombatComponent || CombatComponent->bHasActiveEnemy)
+    if (RaidState != ERaidState::InRaid || !CombatComponent || CombatComponent->bHasActiveEnemy ||
+        PlayerPosture == EPlayerRaidPosture::Ambushing ||
+        (EnemyManagerComponent && EnemyManagerComponent->HasActiveAmbushReaction()))
     {
         return;
     }
@@ -317,6 +319,18 @@ bool AGridGameMode::RequestAmbushWait()
     return true;
 }
 
+bool AGridGameMode::RequestAmbushCancel()
+{
+    if (RaidState != ERaidState::InRaid || PlayerPosture != EPlayerRaidPosture::Ambushing)
+    {
+        return false;
+    }
+
+    PlayerPosture = EPlayerRaidPosture::Normal;
+    OnGameStateChanged.Broadcast();
+    return true;
+}
+
 bool AGridGameMode::RequestAmbushLetPass()
 {
     if (RaidState != ERaidState::InRaid || PlayerPosture != EPlayerRaidPosture::Ambushing ||
@@ -366,6 +380,13 @@ void AGridGameMode::StartContainerSearch()
     }
 
     if (!MainUI) return;
+
+    if (PlayerPosture == EPlayerRaidPosture::Ambushing ||
+        (EnemyManagerComponent && EnemyManagerComponent->HasActiveAmbushReaction()))
+    {
+        MainUI->QueueEventNotification(TEXT("매복 중에는 컨테이너를 탐색할 수 없습니다."));
+        return;
+    }
 
     if (CombatComponent && CombatComponent->bHasActiveEnemy)
     {
@@ -671,6 +692,7 @@ bool AGridGameMode::StartRaid()
     PreviousPlayerCoord = CurrentPlayerCoord;
     if (MainUI)
     {
+        MainUI->LastDisplayedCombatMessage.Empty();
         MainUI->ShowEventNotification(TEXT(""));
         MainUI->RefreshMinimaps(MapManagerComponent);
     }
@@ -933,6 +955,13 @@ bool AGridGameMode::ExtractRaid()
     if (!StashComponent || !EquipmentComponent)
     {
         if (MainUI) MainUI->QueueEventNotification(TEXT("탈출 준비가 완료되지 않았습니다."));
+        return false;
+    }
+
+    if (PlayerPosture == EPlayerRaidPosture::Ambushing ||
+        (EnemyManagerComponent && EnemyManagerComponent->HasActiveAmbushReaction()))
+    {
+        if (MainUI) MainUI->QueueEventNotification(TEXT("매복 중에는 탈출할 수 없습니다."));
         return false;
     }
 

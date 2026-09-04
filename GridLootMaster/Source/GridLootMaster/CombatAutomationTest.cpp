@@ -1962,6 +1962,117 @@ bool FGridLootMasterScorePreservesMovementTest::RunTest(const FString& Parameter
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterMinimapBlocksAmbushAdvanceTest,
+    "GridLootMaster.Combat.MinimapBlocksAmbushAdvance",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterMinimapBlocksAmbushAdvanceTest::RunTest(const FString& Parameters)
+{
+    UWorld* GameWorld = nullptr;
+    if (GEngine)
+    {
+        for (const FWorldContext& Context : GEngine->GetWorldContexts())
+        {
+            if (Context.World() && Context.World()->IsGameWorld())
+            {
+                GameWorld = Context.World();
+                break;
+            }
+        }
+    }
+
+    TestNotNull(TEXT("A game world is available for ambush advance guard"), GameWorld);
+    if (!GameWorld) return false;
+
+    AGridGameMode* GameMode = Cast<AGridGameMode>(GameWorld->GetAuthGameMode());
+    TestNotNull(TEXT("The active game mode is GridLootMaster"), GameMode);
+    if (!GameMode || !GameMode->MapManagerComponent || !GameMode->EnemyManagerComponent ||
+        !GameMode->CombatComponent)
+    {
+        return false;
+    }
+
+    const ERaidState PreviousRaidState = GameMode->RaidState;
+    const FIntPoint PreviousCoord = GameMode->CurrentPlayerCoord;
+    const FIntPoint PreviousSpawn = GameMode->MapManagerComponent->SpawnPoint;
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->PlayerPosture = EPlayerRaidPosture::Normal;
+    GameMode->CombatComponent->ClearEnemy();
+    GameMode->EnemyManagerComponent->ResetForRaid();
+    GameMode->CurrentPlayerCoord = FIntPoint(0, 0);
+    GameMode->PreviousPlayerCoord = FIntPoint(0, 0);
+    GameMode->MapManagerComponent->SpawnPoint = FIntPoint(0, 0);
+    GameMode->MapManagerComponent->InitializeMap();
+
+    UMinimapWidget* Minimap = CreateWidget<UMinimapWidget>(GameWorld, UMinimapWidget::StaticClass());
+    TestNotNull(TEXT("Minimap widget is created"), Minimap);
+    if (!Minimap) return false;
+    Minimap->InitMinimap(GameMode->MapManagerComponent, false);
+    Minimap->HandleTileClicked(FIntPoint(1, 0));
+    TestTrue(TEXT("A path is selected before ambush"), Minimap->CurrentPath.Num() > 0);
+
+    const FIntPoint MinimapCoord = Minimap->CurrentPlayerCoord;
+    const int32 MinimapProgress = Minimap->CurrentMoveProgress;
+    GameMode->PlayerPosture = EPlayerRaidPosture::Ambushing;
+    Minimap->OnAdvanceClicked();
+    Minimap->OnAdvanceClicked();
+    Minimap->OnAdvanceClicked();
+    TestEqual(TEXT("Player ambush blocks minimap coordinate changes"), Minimap->CurrentPlayerCoord, MinimapCoord);
+    TestEqual(TEXT("Player ambush blocks game mode coordinate changes"), GameMode->CurrentPlayerCoord, MinimapCoord);
+    TestEqual(TEXT("Player ambush blocks minimap progress changes"), Minimap->CurrentMoveProgress, MinimapProgress);
+
+    GameMode->PlayerPosture = EPlayerRaidPosture::Normal;
+    GameMode->EnemyManagerComponent->ResetForRaid();
+    GameMode->MapManagerComponent->SpawnPoint = FIntPoint(0, 0);
+    Minimap->ResetMovement();
+    Minimap->InitMinimap(GameMode->MapManagerComponent, false);
+    Minimap->HandleTileClicked(FIntPoint(1, 0));
+    FEnemyDefinition Ambusher;
+    Ambusher.EnemyID = TEXT("MinimapAmbusher");
+    Ambusher.VisionRangeTiles = 0;
+    Ambusher.DetectionPower = 0;
+    TestTrue(TEXT("Enemy ambusher is spawned for minimap guard"),
+        GameMode->EnemyManagerComponent->SpawnEnemyAt(Ambusher, FIntPoint(0, 1), EEnemyBehaviorProfile::Ambusher));
+    TestTrue(TEXT("Enemy ambush reaction starts at the current player tile"),
+        GameMode->EnemyManagerComponent->TryStartEnemyAmbushAtCurrentPlayer());
+    TestTrue(TEXT("Enemy ambush reaction is active"), GameMode->EnemyManagerComponent->HasActiveAmbushReaction());
+
+    const int32 ContainerItemCount = GameMode->LootContainerComponent
+        ? GameMode->LootContainerComponent->ItemInstances.Num() : 0;
+    GameMode->StartContainerSearch();
+    TestEqual(TEXT("Enemy ambush blocks container search"),
+        GameMode->LootContainerComponent ? GameMode->LootContainerComponent->ItemInstances.Num() : 0,
+        ContainerItemCount);
+    TestFalse(TEXT("Enemy ambush blocks extraction"), GameMode->ExtractRaid());
+    TestEqual(TEXT("Enemy ambush keeps the raid active"), GameMode->RaidState, ERaidState::InRaid);
+    TestFalse(TEXT("Enemy ambush blocks reload requests"), GameMode->CombatComponent->RequestReload());
+    TestTrue(TEXT("Reload rejection reports the ambush guard"),
+        GameMode->CombatComponent->LastCombatMessage.Contains(TEXT("매복")));
+    TestFalse(TEXT("Enemy ambush blocks weapon swap requests"),
+        GameMode->CombatComponent->RequestWeaponSwap(TEXT("Primary2")));
+    TestTrue(TEXT("Weapon swap rejection reports the ambush guard"),
+        GameMode->CombatComponent->LastCombatMessage.Contains(TEXT("매복")));
+
+    const FIntPoint EnemyReactionCoord = Minimap->CurrentPlayerCoord;
+    const int32 EnemyReactionProgress = Minimap->CurrentMoveProgress;
+    Minimap->OnAdvanceClicked();
+    Minimap->OnAdvanceClicked();
+    Minimap->OnAdvanceClicked();
+    TestEqual(TEXT("Enemy ambush blocks minimap coordinate changes"), Minimap->CurrentPlayerCoord, EnemyReactionCoord);
+    TestEqual(TEXT("Enemy ambush blocks game mode coordinate changes"), GameMode->CurrentPlayerCoord, EnemyReactionCoord);
+    TestEqual(TEXT("Enemy ambush blocks minimap progress changes"), Minimap->CurrentMoveProgress, EnemyReactionProgress);
+
+    Minimap->RemoveFromParent();
+    GameMode->PlayerPosture = EPlayerRaidPosture::Normal;
+    GameMode->CombatComponent->ClearEnemy();
+    GameMode->EnemyManagerComponent->ResetForRaid();
+    GameMode->RaidState = PreviousRaidState;
+    GameMode->CurrentPlayerCoord = PreviousCoord;
+    GameMode->MapManagerComponent->SpawnPoint = PreviousSpawn;
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FGridLootMasterTerminalRaidClearsMovementTest,
     "GridLootMaster.Raid.TerminalRaidClearsMovementState",
     EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
