@@ -328,13 +328,51 @@ void AGridGameMode::BeginPlay()
 
 FName AGridGameMode::MakeUniqueInstanceID(FName PreferredID) const
 {
-    if (PreferredID == NAME_None || !StashComponent)
+    if (PreferredID == NAME_None)
     {
         return PreferredID;
     }
 
+    auto ItemUsesID = [](const UItemInstance* Item, FName ID)
+    {
+        return Item && (Item->InstanceID == ID ||
+            (Item->EquippedSight && Item->EquippedSight->InstanceID == ID) ||
+            (Item->EquippedMuzzle && Item->EquippedMuzzle->InstanceID == ID) ||
+            (Item->EquippedMagazine && Item->EquippedMagazine->InstanceID == ID));
+    };
+    auto InventoryUsesID = [&](const UGridInventoryComponent* Inventory, FName ID)
+    {
+        if (!Inventory) return false;
+        for (const TPair<FName, UItemInstance*>& Pair : Inventory->ItemInstances)
+        {
+            if (Pair.Key == ID || ItemUsesID(Pair.Value, ID)) return true;
+        }
+        return Inventory->GridCells.Contains(ID);
+    };
+    auto IsUsed = [&](FName ID)
+    {
+        const UGridInventoryComponent* Inventories[] = {
+            InventoryComponent, RigComponent, PocketComponent, SafeBoxComponent, LootContainerComponent, StashComponent };
+        for (const UGridInventoryComponent* Inventory : Inventories)
+        {
+            if (InventoryUsesID(Inventory, ID)) return true;
+        }
+        for (const TPair<FName, UGridInventoryComponent*>& Pair : CorpseLootInventories)
+        {
+            if (InventoryUsesID(Pair.Value, ID)) return true;
+        }
+        if (EquipmentComponent)
+        {
+            for (const TPair<FName, UItemInstance*>& Pair : EquipmentComponent->EquippedItems)
+            {
+                if (ItemUsesID(Pair.Value, ID)) return true;
+            }
+        }
+        return false;
+    };
+
     FName Candidate = PreferredID;
-    while (StashComponent->GetItemInstance(Candidate) || StashComponent->GridCells.Contains(Candidate))
+    while (IsUsed(Candidate))
     {
         Candidate = FName(*FString::Printf(TEXT("%s_%s"), *PreferredID.ToString(), *FGuid::NewGuid().ToString()));
     }
@@ -467,7 +505,7 @@ bool AGridGameMode::EnsureCorpseLootGenerated(FName EnemyInstanceID)
         }
         if (!Selected) continue;
         UItemInstance* Item = NewObject<UItemInstance>(CorpseInventory);
-        Item->InstanceID = FName(*FString::Printf(TEXT("Corpse_%s_%d"), *EnemyInstanceID.ToString(), Index));
+        Item->InstanceID = MakeUniqueInstanceID(FName(*FString::Printf(TEXT("Corpse_%s_%d"), *EnemyInstanceID.ToString(), Index)));
         Item->InitFromData(*Selected);
         Item->bIsExamined = false;
         int32 X = INDEX_NONE;
@@ -901,7 +939,7 @@ void AGridGameMode::OnSearchPhaseComplete()
         if (!SelectedItem) continue;
 
         FString UniqueName = FString::Printf(TEXT("%s_%d"), *SelectedItem->ItemID.ToString(), SpawnCounter);
-        FName ItemID = FName(*UniqueName);
+        FName ItemID = MakeUniqueInstanceID(FName(*UniqueName));
         
         // 아이템 인스턴스 생성
         UItemInstance* NewItem = NewObject<UItemInstance>(this);

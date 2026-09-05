@@ -403,6 +403,9 @@ FReply UDraggableItemWidget::NativeOnKeyDown(const FGeometry& InGeometry, const 
 {
     if (InKeyEvent.GetKey() == EKeys::R && ItemObj)
     {
+        int32 CurrentSection = INDEX_NONE;
+        int32 CurrentX = INDEX_NONE;
+        int32 CurrentY = INDEX_NONE;
         if (SourceInventory)
         {
             if (SourceInventory->GetItemInstance(ItemObj->InstanceID) != ItemObj)
@@ -410,9 +413,6 @@ FReply UDraggableItemWidget::NativeOnKeyDown(const FGeometry& InGeometry, const 
                 return FReply::Handled();
             }
 
-            int32 CurrentSection = INDEX_NONE;
-            int32 CurrentX = INDEX_NONE;
-            int32 CurrentY = INDEX_NONE;
             SourceInventory->FindItemPlacement(ItemObj->InstanceID, CurrentSection, CurrentX, CurrentY);
 
             if (CurrentX == INDEX_NONE || CurrentY == INDEX_NONE)
@@ -428,6 +428,11 @@ FReply UDraggableItemWidget::NativeOnKeyDown(const FGeometry& InGeometry, const 
         }
 
         ItemObj->bIsRotated = !ItemObj->bIsRotated;
+        if (SourceInventory && !SourceInventory->AddItemToSection(ItemObj, CurrentSection, CurrentX, CurrentY))
+        {
+            ItemObj->bIsRotated = !ItemObj->bIsRotated;
+            return FReply::Handled();
+        }
 
         ItemObj->OnItemModified.Broadcast();
         if (SourceInventory)
