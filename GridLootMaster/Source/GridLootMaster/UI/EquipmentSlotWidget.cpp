@@ -244,6 +244,7 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
             EquippedItem->OnItemModified.Broadcast();
             RefreshSlotUI();
             if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->OnInventoryChanged.Broadcast();
+            UItemDragDropOperation::ClearActiveOperation(ItemDropOp);
             return true;
         }
     }
@@ -283,6 +284,7 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
             EquippedItem->OnItemModified.Broadcast();
             RefreshSlotUI();
             if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->OnInventoryChanged.Broadcast();
+            UItemDragDropOperation::ClearActiveOperation(ItemDropOp);
             return true;
         }
     }
@@ -693,6 +695,10 @@ void UEquipmentSlotWidget::HandleUnloadClicked(UItemInstance* ItemObj)
 void UEquipmentSlotWidget::NativeOnDragCancelled(const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
 {
     Super::NativeOnDragCancelled(InDragDropEvent, InOperation);
+    if (UItemDragDropOperation* ItemDropOp = Cast<UItemDragDropOperation>(InOperation))
+    {
+        UItemDragDropOperation::ClearActiveOperation(ItemDropOp);
+    }
     // 드래그가 취소되면 슬롯 UI를 갱신하여 꽉 찬 뷰로 되돌림
     RefreshSlotUI();
 }

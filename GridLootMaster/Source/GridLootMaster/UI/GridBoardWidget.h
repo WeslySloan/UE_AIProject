@@ -30,6 +30,7 @@ public:
     int32 PendingSplitX;
     int32 PendingSplitY;
     int32 PendingSplitSectionIndex = 0;
+    bool PendingSplitRotation = false;
 
     UFUNCTION()
     void OnSplitDragConfirmed(int32 SplitAmount);

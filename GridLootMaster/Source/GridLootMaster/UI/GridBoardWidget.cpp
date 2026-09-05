@@ -77,6 +77,10 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
         if (GetGridCellFromMousePosition(InGeometry, InDragDropEvent, ItemDropOp, GridX, GridY))
         {
             FIntPoint CurrentSize = ItemDropOp->ItemObj->GetCurrentSize();
+            if (ItemDropOp->bPreviewRotation != ItemDropOp->ItemObj->bIsRotated)
+            {
+                CurrentSize = FIntPoint(CurrentSize.Y, CurrentSize.X);
+            }
             int32 Width = CurrentSize.X;
             int32 Height = CurrentSize.Y;
 
@@ -88,6 +92,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                 PendingSplitSectionIndex = SectionIndex;
                 PendingSplitX = GridX;
                 PendingSplitY = GridY;
+                PendingSplitRotation = ItemDropOp->bPreviewRotation;
                 
                 USplitStackWidget* SplitWidget = CreateWidget<USplitStackWidget>(GetWorld(), USplitStackWidget::StaticClass());
                 if (SplitWidget)
@@ -101,6 +106,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                 {
                     ItemDropOp->OriginalWidget->SetVisibility(ESlateVisibility::Visible);
                 }
+                UItemDragDropOperation::ClearActiveOperation(ItemDropOp);
                 return true;
             }
 
@@ -165,6 +171,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                                 ExistingItemObj->OnItemModified.Broadcast();
                                 RefreshGridUI();
                                 if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->OnInventoryChanged.Broadcast();
+                                UItemDragDropOperation::ClearActiveOperation(ItemDropOp);
                                 return true;
                             }
                         }
@@ -217,6 +224,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                                 
                                 RefreshGridUI();
                                 if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->OnInventoryChanged.Broadcast();
+                                UItemDragDropOperation::ClearActiveOperation(ItemDropOp);
                                 return true;
                             }
                         }
@@ -287,6 +295,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                             if (GM && GM->PocketComponent) GM->PocketComponent->OnInventoryChanged.Broadcast();
                             if (GM && GM->StashComponent) GM->StashComponent->OnInventoryChanged.Broadcast();
 
+                            UItemDragDropOperation::ClearActiveOperation(ItemDropOp);
                             return true;
                         }
                     }
@@ -299,6 +308,15 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                 AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
                 bool bMoved = false;
 
+                auto CommitPreviewRotation = [&]()
+                {
+                    ItemDropOp->ItemObj->bIsRotated = ItemDropOp->bPreviewRotation;
+                };
+                auto RestoreOriginalRotation = [&]()
+                {
+                    ItemDropOp->ItemObj->bIsRotated = ItemDropOp->bOriginalRotation;
+                };
+
                 if (ItemDropOp->SourceInventory &&
                     ItemDropOp->SourceInventory->GetItemInstance(ItemDropOp->ItemID) != ItemDropOp->ItemObj)
                 {
@@ -308,14 +326,20 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                 // 다른 인벤토리에서 이동할 때는 대상 추가를 먼저 성공시킨 뒤 원본을 제거합니다.
                 if (ItemDropOp->SourceInventory && ItemDropOp->SourceInventory != InventoryComponent)
                 {
+                    CommitPreviewRotation();
                     bMoved = InventoryComponent->AddItemToSection(ItemDropOp->ItemObj, SectionIndex, GridX, GridY);
                     if (bMoved)
                     {
                         if (!ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemID))
                         {
                             InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                            RestoreOriginalRotation();
                             bMoved = false;
                         }
+                    }
+                    else
+                    {
+                        RestoreOriginalRotation();
                     }
                 }
                 else if (ItemDropOp->SourceInventory == InventoryComponent)
@@ -326,10 +350,15 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                     InventoryComponent->FindItemPlacement(ItemDropOp->ItemID, OriginalSection, OriginalX, OriginalY);
 
                     const bool bSourceRemoved = InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                    if (bSourceRemoved)
+                    {
+                        CommitPreviewRotation();
+                    }
                     bMoved = bSourceRemoved && InventoryComponent->AddItemToSection(ItemDropOp->ItemObj, SectionIndex, GridX, GridY);
                     if (!bMoved && OriginalX != INDEX_NONE)
                     {
                         // 새 위치 수납 실패 시 원래 위치로 복구합니다.
+                        RestoreOriginalRotation();
                         InventoryComponent->AddItemToSection(ItemDropOp->ItemObj, OriginalSection, OriginalX, OriginalY);
                     }
                 }
@@ -384,6 +413,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                     }
 
                     // 출처가 없는 드래그도 대상 추가를 먼저 성공시켜 실패 시 원본을 보존합니다.
+                    CommitPreviewRotation();
                     bMoved = InventoryComponent->AddItemToSection(ItemDropOp->ItemObj, SectionIndex, GridX, GridY);
                     if (bMoved)
                     {
@@ -392,6 +422,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                             if (!UnknownSourceInventory->RemoveItem(ItemDropOp->ItemID))
                             {
                                 InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                                RestoreOriginalRotation();
                                 bMoved = false;
                             }
                         }
@@ -400,9 +431,14 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                             if (!GM->EquipmentComponent->RemoveItemBySlotID(SourceEquipmentSlot))
                             {
                                 InventoryComponent->RemoveItem(ItemDropOp->ItemID);
+                                RestoreOriginalRotation();
                                 bMoved = false;
                             }
                         }
+                    }
+                    else
+                    {
+                        RestoreOriginalRotation();
                     }
                 }
                 
@@ -419,6 +455,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                     if (GM && GM->RigComponent) GM->RigComponent->OnInventoryChanged.Broadcast();
                     if (GM && GM->PocketComponent) GM->PocketComponent->OnInventoryChanged.Broadcast();
                     if (GM && GM->StashComponent) GM->StashComponent->OnInventoryChanged.Broadcast();
+                    UItemDragDropOperation::ClearActiveOperation(ItemDropOp);
                     return true;
                 }
             }
@@ -446,6 +483,10 @@ bool UGridBoardWidget::NativeOnDragOver(const FGeometry& InGeometry, const FDrag
         if (GetGridCellFromMousePosition(InGeometry, InDragDropEvent, ItemDropOp, GridX, GridY))
         {
             FIntPoint ItemSize = ItemDropOp->ItemObj->GetCurrentSize();
+            if (ItemDropOp->bPreviewRotation != ItemDropOp->ItemObj->bIsRotated)
+            {
+                ItemSize = FIntPoint(ItemSize.Y, ItemSize.X);
+            }
             int32 Width = ItemSize.X;
             int32 Height = ItemSize.Y;
 
@@ -592,6 +633,10 @@ void UGridBoardWidget::OnSplitDragConfirmed(int32 SplitAmount)
     SplitAmount = FMath::Clamp(SplitAmount, 1, MaxSplitAmount);
 
     FIntPoint Size = PendingSplitItem->GetCurrentSize();
+    if (PendingSplitRotation != PendingSplitItem->bIsRotated)
+    {
+        Size = FIntPoint(Size.Y, Size.X);
+    }
     int32 Width = Size.X;
     int32 Height = Size.Y;
 
@@ -641,7 +686,7 @@ void UGridBoardWidget::OnSplitDragConfirmed(int32 SplitAmount)
         NewItem->BaseSize = PendingSplitItem->BaseSize;
         NewItem->CurrentStack = SplitAmount;
         NewItem->MaxStack = PendingSplitItem->MaxStack;
-        NewItem->bIsRotated = PendingSplitItem->bIsRotated;
+        NewItem->bIsRotated = PendingSplitRotation;
         NewItem->bIsExamined = PendingSplitItem->bIsExamined;
         NewItem->AttachmentType = PendingSplitItem->AttachmentType;
         NewItem->CompatibleAmmo = PendingSplitItem->CompatibleAmmo;

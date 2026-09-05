@@ -20,6 +20,35 @@
 #include "../GridGameMode.h"
 #include "Kismet/GameplayStatics.h"
 
+static TWeakObjectPtr<UItemDragDropOperation> GActiveItemDragOperation;
+
+void UItemDragDropOperation::TogglePreviewRotation()
+{
+    bPreviewRotation = !bPreviewRotation;
+    if (DragVisual)
+    {
+        DragVisual->SetDragPreviewRotation(bPreviewRotation);
+    }
+}
+
+void UItemDragDropOperation::SetActiveOperation(UItemDragDropOperation* InOperation)
+{
+    GActiveItemDragOperation = InOperation;
+}
+
+void UItemDragDropOperation::ClearActiveOperation(const UItemDragDropOperation* InOperation)
+{
+    if (GActiveItemDragOperation.Get() == InOperation)
+    {
+        GActiveItemDragOperation.Reset();
+    }
+}
+
+UItemDragDropOperation* UItemDragDropOperation::GetActiveOperation()
+{
+    return GActiveItemDragOperation.Get();
+}
+
 void UDraggableItemWidget::NativeConstruct()
 {
     Super::NativeConstruct();
@@ -28,12 +57,14 @@ void UDraggableItemWidget::NativeConstruct()
 
 void UDraggableItemWidget::HandleItemModified()
 {
-    InitWidgetUI(SourceInventory == nullptr);
+    InitWidgetUI(bIsEquippedVisual);
 }
 
 void UDraggableItemWidget::InitWidgetUI(bool bEquipped)
 {
     if (!WidgetTree || !ItemObj) return;
+
+    bIsEquippedVisual = bEquipped;
 
     ItemObj->OnItemModified.RemoveDynamic(this, &UDraggableItemWidget::HandleItemModified);
     ItemObj->OnItemModified.AddUniqueDynamic(this, &UDraggableItemWidget::HandleItemModified);
@@ -55,6 +86,10 @@ void UDraggableItemWidget::InitWidgetUI(bool bEquipped)
     else
     {
         FIntPoint CurrentSize = ItemObj->GetCurrentSize();
+        if (bHasDragPreviewRotation && bDragPreviewRotation != ItemObj->bIsRotated)
+        {
+            CurrentSize = FIntPoint(CurrentSize.Y, CurrentSize.X);
+        }
         RootBox->SetWidthOverride(CurrentSize.X * 64.0f);
         RootBox->SetHeightOverride(CurrentSize.Y * 64.0f);
     }
@@ -291,6 +326,13 @@ FReply UDraggableItemWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, 
     return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
 }
 
+void UDraggableItemWidget::SetDragPreviewRotation(bool bInPreviewRotation)
+{
+    bHasDragPreviewRotation = true;
+    bDragPreviewRotation = bInPreviewRotation;
+    InitWidgetUI(bIsEquippedVisual);
+}
+
 void UDraggableItemWidget::OnAutoSplitConfirmed(int32 SplitAmount)
 {
     if (!ItemObj || !SourceInventory) return;
@@ -380,6 +422,8 @@ void UDraggableItemWidget::NativeOnDragDetected(const FGeometry& InGeometry, con
     DragDropOp->ItemObj = ItemObj;
     DragDropOp->OriginalWidget = this; 
     DragDropOp->bIsSplitDrag = InMouseEvent.IsShiftDown() && (ItemObj->CurrentStack > 1);
+    DragDropOp->bOriginalRotation = ItemObj->bIsRotated;
+    DragDropOp->bPreviewRotation = ItemObj->bIsRotated;
     DragDropOp->SourceInventory = SourceInventory;
     DragDropOp->SourceSectionIndex = SourceSectionIndex;
     
@@ -388,6 +432,8 @@ void UDraggableItemWidget::NativeOnDragDetected(const FGeometry& InGeometry, con
     
     UDraggableItemWidget* DragVisual = CreateWidget<UDraggableItemWidget>(GetWorld(), UDraggableItemWidget::StaticClass());
     DragVisual->ItemObj = ItemObj;
+    DragVisual->CurrentDragOp = DragDropOp;
+    DragDropOp->DragVisual = DragVisual;
     DragVisual->InitWidgetUI();
     
     DragDropOp->DefaultDragVisual = DragVisual;
@@ -395,14 +441,41 @@ void UDraggableItemWidget::NativeOnDragDetected(const FGeometry& InGeometry, con
 
     CurrentDragOp = DragDropOp;
     CurrentDragVisual = DragVisual;
+    UItemDragDropOperation::SetActiveOperation(DragDropOp);
+    SetVisibility(ESlateVisibility::Hidden);
 
     OutOperation = DragDropOp;
+}
+
+void UDraggableItemWidget::NativeOnDragCancelled(const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
+{
+    Super::NativeOnDragCancelled(InDragDropEvent, InOperation);
+
+    UItemDragDropOperation* ItemDropOp = Cast<UItemDragDropOperation>(InOperation);
+    if (!ItemDropOp || ItemDropOp->OriginalWidget != this) return;
+
+    UItemDragDropOperation::ClearActiveOperation(ItemDropOp);
+
+    if (ItemObj)
+    {
+        ItemObj->bIsRotated = ItemDropOp->bOriginalRotation;
+    }
+    SetVisibility(ESlateVisibility::Visible);
+    CurrentDragOp = nullptr;
+    CurrentDragVisual = nullptr;
 }
 
 FReply UDraggableItemWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
 {
     if (InKeyEvent.GetKey() == EKeys::R && ItemObj)
     {
+        if (CurrentDragOp && CurrentDragOp->ItemObj == ItemObj)
+        {
+            CurrentDragOp->TogglePreviewRotation();
+            OnItemRotated();
+            return FReply::Handled();
+        }
+
         int32 CurrentSection = INDEX_NONE;
         int32 CurrentX = INDEX_NONE;
         int32 CurrentY = INDEX_NONE;

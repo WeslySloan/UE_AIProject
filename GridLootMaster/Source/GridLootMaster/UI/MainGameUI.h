@@ -111,6 +111,7 @@ public:
     void RestoreRaidInputFocus();
 
     bool HasRaidUIFocus() const;
+    bool HasActiveRaidTransientPopup() const;
     void ScheduleRaidInputFocusRestore();
 
     UFUNCTION()

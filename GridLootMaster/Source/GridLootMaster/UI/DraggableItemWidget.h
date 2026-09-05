@@ -32,6 +32,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Item")
     void InitWidgetUI(bool bEquipped = false);
 
+    void SetDragPreviewRotation(bool bInPreviewRotation);
+
+    bool bIsEquippedVisual = false;
+
     // 프로그레스 바 포인터 (선택적)
     UPROPERTY()
     class UProgressBar* ExamineProgressBar;
@@ -44,11 +48,15 @@ public:
     UPROPERTY()
     UDraggableItemWidget* CurrentDragVisual;
 
+    bool bHasDragPreviewRotation = false;
+    bool bDragPreviewRotation = false;
+
 
 protected:
     virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual void NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation) override;
+    virtual void NativeOnDragCancelled(const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
     
     // 키보드 입력을 받을 수 있도록 포커스 가능 상태로 설정
     virtual bool NativeSupportsKeyboardFocus() const override { return true; }

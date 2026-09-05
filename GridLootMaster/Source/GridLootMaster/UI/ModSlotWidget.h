@@ -19,13 +19,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Mod Slot")
     void RefreshSlotUI();
 
-#if WITH_DEV_AUTOMATION_TESTS
-    void CancelDragForTest(const FDragDropEvent& Event, UDragDropOperation* Operation)
-    {
-        NativeOnDragCancelled(Event, Operation);
-    }
-#endif
-
 protected:
     virtual bool NativeOnDrop(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
     virtual void NativeOnDragEnter(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;

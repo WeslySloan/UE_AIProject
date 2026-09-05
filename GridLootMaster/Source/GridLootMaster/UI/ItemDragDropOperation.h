@@ -25,8 +25,22 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag and Drop")
     class UDraggableItemWidget* OriginalWidget;
 
+    UPROPERTY()
+    class UDraggableItemWidget* DragVisual;
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag and Drop")
     bool bIsSplitDrag = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag and Drop")
+    bool bOriginalRotation = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag and Drop")
+    bool bPreviewRotation = false;
+
+    void TogglePreviewRotation();
+    static void SetActiveOperation(UItemDragDropOperation* InOperation);
+    static void ClearActiveOperation(const UItemDragDropOperation* InOperation);
+    static UItemDragDropOperation* GetActiveOperation();
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drag and Drop")
     class UGridInventoryComponent* SourceInventory = nullptr;

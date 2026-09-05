@@ -159,6 +159,7 @@ bool UModSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEv
             EquippedMod->OnItemModified.Broadcast();
             // InspectWidget 등 갱신을 위해 무기 상태 변경 브로드캐스트 필요하다면 여기서 처리
             WeaponObj->OnItemModified.Broadcast();
+            UItemDragDropOperation::ClearActiveOperation(ItemDropOp);
             return true;
         }
     }
@@ -250,6 +251,7 @@ bool UModSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEv
     if (ItemDropOp->SourceInventory) ItemDropOp->SourceInventory->OnInventoryChanged.Broadcast();
     WeaponObj->OnItemModified.Broadcast();
 
+    UItemDragDropOperation::ClearActiveOperation(ItemDropOp);
     return true;
 }
 
@@ -346,6 +348,7 @@ void UModSlotWidget::NativeOnDragCancelled(const FDragDropEvent& InDragDropEvent
     Super::NativeOnDragCancelled(InDragDropEvent, InOperation);
 
     UItemDragDropOperation* ItemDropOp = Cast<UItemDragDropOperation>(InOperation);
+    if (ItemDropOp) UItemDragDropOperation::ClearActiveOperation(ItemDropOp);
     if (!ItemDropOp || ItemDropOp->SourceModSlot != this || !ItemDropOp->ItemObj || !WeaponObj) return;
 
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));

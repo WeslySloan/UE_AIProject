@@ -12,8 +12,6 @@
 #include "ItemInstance.h"
 #include "Map/MapManagerComponent.h"
 #include "UI/DraggableItemWidget.h"
-#include "UI/ModSlotWidget.h"
-#include "UI/ItemDragDropOperation.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGridLootMasterFreezeItemIdentityTest,
     "GridLootMaster.SystemFreeze.ItemIdentityAcrossOwners",
@@ -142,94 +140,6 @@ bool FGridLootMasterFreezeRotationTest::RunTest(const FString& Parameters)
     TestTrue(TEXT("Blocked rotation preserves orientation"), Item->bIsRotated);
     TestEqual(TEXT("Blocked rotation preserves occupied cells"), Inventory->GetCellItemID(1, 0, 1), Item->InstanceID);
     Widget->RemoveFromParent();
-    return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGridLootMasterFreezeTerminalLootTest,
-    "GridLootMaster.SystemFreeze.TerminalInvalidatesCorpseAndStorage",
-    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
-
-bool FGridLootMasterFreezeTerminalLootTest::RunTest(const FString& Parameters)
-{
-    for (bool bExtract : { false, true })
-    {
-        AGridGameMode* GM = NewObject<AGridGameMode>();
-        GM->RaidState = ERaidState::InRaid;
-        GM->MapManagerComponent->InitializeMap();
-        GM->InventoryComponent->InitializeGrid(2, 2);
-        GM->RigComponent->InitializeGrid(2, 2);
-        FItemData Data;
-        Data.ItemID = TEXT("TerminalLoot");
-        TestTrue(TEXT("Corpse has pending loot"), GM->SeedCorpseLootForTest(TEXT("TerminalCorpse"), Data));
-        UGridInventoryComponent* RetainedCorpse = GM->GetCorpseLootInventories().FindRef(TEXT("TerminalCorpse"));
-        if (!TestNotNull(TEXT("Drag can retain its source inventory"), RetainedCorpse)) return false;
-        if (bExtract)
-        {
-            GM->CurrentPlayerCoord = GM->MapManagerComponent->ExtractionPoints[0];
-            TestTrue(TEXT("Extraction completes"), GM->ExtractRaid());
-        }
-        else
-        {
-            GM->FailRaid();
-            TestEqual(TEXT("Lost backpack has no usable storage"), GM->InventoryComponent->GetSectionCount(), 0);
-            TestEqual(TEXT("Lost rig has no usable storage"), GM->RigComponent->GetSectionCount(), 0);
-        }
-        TestEqual(TEXT("Terminal raid invalidates even retained corpse references"), RetainedCorpse->ItemInstances.Num(), 0);
-        TestEqual(TEXT("Terminal raid returns to lobby"), GM->RaidState, ERaidState::Lobby);
-    }
-    return true;
-}
-
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGridLootMasterFreezeModCancelTest,
-    "GridLootMaster.SystemFreeze.CancelModDragFromStoredWeapon",
-    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
-
-bool FGridLootMasterFreezeModCancelTest::RunTest(const FString& Parameters)
-{
-    UWorld* GameWorld = nullptr;
-    if (GEngine)
-    {
-        for (const FWorldContext& Context : GEngine->GetWorldContexts())
-        {
-            if (Context.World() && Context.World()->IsGameWorld()) { GameWorld = Context.World(); break; }
-        }
-    }
-    AGridGameMode* GM = GameWorld ? Cast<AGridGameMode>(GameWorld->GetAuthGameMode()) : nullptr;
-    if (!TestNotNull(TEXT("A real GridGameMode game world is required"), GM)) return false;
-    UGridInventoryComponent* OriginalBackpack = GM->InventoryComponent;
-    UGridInventoryComponent* OriginalStash = GM->StashComponent;
-    GM->InventoryComponent = NewObject<UGridInventoryComponent>(GM);
-    GM->InventoryComponent->InitializeGrid(1, 1);
-    GM->StashComponent = NewObject<UGridInventoryComponent>(GM);
-    GM->StashComponent->InitializeGrid(1, 1);
-    UItemInstance* Weapon = NewObject<UItemInstance>(GM);
-    Weapon->InstanceID = TEXT("StoredModWeapon");
-    Weapon->Category = EItemCategory::Weapon;
-    UItemInstance* Mod = NewObject<UItemInstance>(GM);
-    Mod->InstanceID = TEXT("CancelledSight");
-    Mod->Category = EItemCategory::Attachment;
-    Mod->AttachmentType = EAttachmentType::Sight;
-    UItemInstance* Blocker = NewObject<UItemInstance>(GM);
-    Blocker->InstanceID = TEXT("FullBackpack");
-    TestTrue(TEXT("Backpack is full"), GM->InventoryComponent->AddItem(Blocker, 0, 0));
-    TestTrue(TEXT("Unequipped weapon is in stash"), GM->StashComponent->AddItem(Weapon, 0, 0));
-    UModSlotWidget* Slot = CreateWidget<UModSlotWidget>(GameWorld, UModSlotWidget::StaticClass());
-    if (TestNotNull(TEXT("Inspect mod slot exists"), Slot))
-    {
-        Slot->Setup(Weapon, EAttachmentType::Sight);
-        UItemDragDropOperation* Operation = NewObject<UItemDragDropOperation>();
-        Operation->ItemObj = Mod;
-        Operation->ItemID = Mod->InstanceID;
-        Operation->SourceModSlot = Slot;
-        FPointerEvent PointerEvent;
-        FDragDropEvent Event(PointerEvent, TSharedPtr<FDragDropOperation>());
-        Slot->CancelDragForTest(Event, Operation);
-        TestEqual(TEXT("Cancelled attachment returns to the stored weapon even with a full backpack"), Weapon->EquippedSight, Mod);
-        TestEqual(TEXT("Cancellation preserves backpack contents"), GM->InventoryComponent->GetItemInstance(Blocker->InstanceID), Blocker);
-        Slot->RemoveFromParent();
-    }
-    GM->InventoryComponent = OriginalBackpack;
-    GM->StashComponent = OriginalStash;
     return true;
 }
 

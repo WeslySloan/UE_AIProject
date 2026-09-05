@@ -1,5 +1,10 @@
 #include "MainGameUI.h"
+#include "ItemDragDropOperation.h"
+#include "ContextMenuWidget.h"
+#include "InspectWidget.h"
+#include "SplitStackWidget.h"
 #include "Blueprint/WidgetTree.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/TextBlock.h"
@@ -690,7 +695,7 @@ void UMainGameUI::RestoreRaidInputFocus()
 {
     bRaidFocusRestorePending = false;
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
-    if (!GM || GM->RaidState != ERaidState::InRaid || HasRaidUIFocus()) return;
+    if (!GM || GM->RaidState != ERaidState::InRaid || HasRaidUIFocus() || HasActiveRaidTransientPopup()) return;
 
     APlayerController* PC = GetOwningPlayer();
     if (!PC) return;
@@ -707,6 +712,35 @@ bool UMainGameUI::HasRaidUIFocus() const
 {
     APlayerController* PC = GetOwningPlayer();
     return PC && (HasUserFocus(PC) || HasUserFocusedDescendants(PC));
+}
+
+bool UMainGameUI::HasActiveRaidTransientPopup() const
+{
+    UWorld* World = GetWorld();
+    if (!World) return false;
+
+    TArray<UUserWidget*> Popups;
+    const TArray<TSubclassOf<UUserWidget>> PopupClasses = {
+        UContextMenuWidget::StaticClass(),
+        UInspectWidget::StaticClass(),
+        USplitStackWidget::StaticClass()
+    };
+
+    for (const TSubclassOf<UUserWidget>& PopupClass : PopupClasses)
+    {
+        Popups.Reset();
+        UWidgetBlueprintLibrary::GetAllWidgetsOfClass(World, Popups, PopupClass, true);
+        for (UUserWidget* Popup : Popups)
+        {
+            if (Popup && Popup->IsInViewport() && Popup->GetVisibility() != ESlateVisibility::Collapsed &&
+                Popup->GetVisibility() != ESlateVisibility::Hidden)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 void UMainGameUI::ScheduleRaidInputFocusRestore()
@@ -853,6 +887,12 @@ FReply UMainGameUI::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent
     }
     else if (Key == EKeys::R)
     {
+        if (UItemDragDropOperation* ActiveDrag = UItemDragDropOperation::GetActiveOperation())
+        {
+            ActiveDrag->TogglePreviewRotation();
+            return FReply::Handled();
+        }
+
         if (GM && GM->CombatComponent)
         {
             if (!GM->CombatComponent->RequestReload() &&
@@ -871,7 +911,7 @@ void UMainGameUI::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
     Super::NativeTick(MyGeometry, InDeltaTime);
     if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
     {
-        if (GM->RaidState == ERaidState::InRaid && !HasRaidUIFocus())
+        if (GM->RaidState == ERaidState::InRaid && !HasRaidUIFocus() && !HasActiveRaidTransientPopup())
         {
             ScheduleRaidInputFocusRestore();
         }
