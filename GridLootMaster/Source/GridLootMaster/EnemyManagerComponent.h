@@ -143,6 +143,8 @@ public:
 
     bool HasEnemyAt(FIntPoint Coordinate) const;
 
+    bool FindDeadEnemyAt(FIntPoint Coordinate, FName& OutInstanceID) const;
+
     int32 GetAliveEnemyCount() const;
 
     int32 GetNextSpawnTick() const;
@@ -150,6 +152,8 @@ public:
     FName GetActiveEnemyInstanceID() const;
 
     bool GetActiveEnemyCoordinate(FIntPoint& OutCoordinate) const;
+    void EndCombatContact();
+    void SyncCombatContact();
 
     bool FindPlayerAmbushTarget(FName& OutInstanceID) const;
 
@@ -176,7 +180,6 @@ private:
     bool ResolveAmbushAttack(float DamageMultiplier);
     int32 GetCoverValueAt(FIntPoint Coordinate) const;
     int32 RollAmbushPercent();
-    void SyncCombatContact();
     bool DoesEnemyDetectPlayer(const FEnemyWorldInstance& Instance) const;
     bool DoesPlayerSuspectEnemy(const FEnemyWorldInstance& Instance) const;
     void ScheduleNextSpawn();
@@ -200,5 +203,6 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 public:
     int32 ForcedAmbushRollForTest = -1;
+    bool MarkEnemyDeadForTest(FName InstanceID);
 #endif
 };

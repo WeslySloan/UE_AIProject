@@ -77,6 +77,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
     FIntPoint Size;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Storage")
+    FString StorageLayoutSpec;
+
     // 겹치기 최대 수량
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item Data")
     int32 MaxStack;
@@ -149,6 +152,7 @@ public:
         , Category(EItemCategory::Valuable)
         , Rarity(EItemRarity::Common)
         , Size(FIntPoint(1, 1))
+        , StorageLayoutSpec()
         , MaxStack(1)
         , AttachmentType(EAttachmentType::None)
         , MaxAmmo(0)

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
+#include "ItemData.h"
 #include "GridGameMode.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnGameStateChanged);
@@ -124,6 +125,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Stash")
     bool LoadStash();
 
+    int32 LoadedInitialQAMagazineSeedVersion = 0;
+
     UFUNCTION(BlueprintCallable, Category = "Raid")
     bool ExtractRaid();
 
@@ -165,13 +168,29 @@ public:
     bool RequestAmbushFlee();
 
     bool TryRestorePreviousPlayerCoord();
+    bool RequestPlayerCardinalMove(FIntPoint Delta);
+    bool MovePlayerDuringCombat(FIntPoint NewCoordinate);
+
+    bool RequestSearchDeadBody();
+    bool HasDeadBodyAtCurrentPlayerCoord() const;
+    bool FindSearchableDeadBodyAt(FIntPoint Coordinate, FName& OutInstanceID) const;
+    bool FindCorpseLootInventory(FName ItemID, UGridInventoryComponent*& OutInventory) const;
+    const TMap<FName, UGridInventoryComponent*>& GetCorpseLootInventories() const;
+    int32 GetCorpseLootGenerationCount(FName EnemyInstanceID) const;
+    void InvalidateCorpseSearchIfPlayerLeftTile();
 
 #if WITH_DEV_AUTOMATION_TESTS
     void GameTimerUpdateForTest();
     void SearchPhaseCompleteForTest();
+    bool SeedCorpseLootForTest(FName EnemyInstanceID, const FItemData& ItemData);
+    int32 GetPendingExamineCountForTest() const;
+    void ProcessNextExamineForTest();
 #endif
 
     FName MakeUniqueInstanceID(FName PreferredID) const;
+
+    bool ReconfigureStorageForEquipmentSlot(FName SlotID, const UItemInstance* StorageItem);
+    bool TryStandaloneStorageUnequip(FName SlotID, UItemInstance* Item);
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
     void ApplyPlayerDamage(int32 DamageAmount);
@@ -212,10 +231,13 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "Combat")
     void HandlePlayerMoved(FIntPoint NewCoordinate);
+    void RefreshEnemyWorldUI();
 
     // [탐색] 버튼을 눌렀을 때 서칭 시퀀스 시작
     UFUNCTION()
     void StartContainerSearch();
+
+    void InvalidateContainerSearchIfPlayerLeftTile();
 
 protected:
     UPROPERTY()
@@ -226,9 +248,28 @@ protected:
     // 서칭 페이즈 타이머
     FTimerHandle SearchPhaseTimer;
     FTimerHandle ExamineTimer;
+
+    FIntPoint ActiveContainerSearchCoord = FIntPoint::ZeroValue;
+    bool bHasActiveContainerSearch = false;
+
+    UPROPERTY()
+    TMap<FName, UGridInventoryComponent*> CorpseLootInventories;
+
+    UPROPERTY()
+    TMap<FName, int32> CorpseLootGenerationCounts;
+
+    FName ActiveCorpseInstanceID = NAME_None;
+    FIntPoint ActiveCorpseSearchCoord = FIntPoint::ZeroValue;
+
+    void ClearCorpseLoot();
+    bool EnsureCorpseLootGenerated(FName EnemyInstanceID);
+    void BindLootInventoryToUI(UGridInventoryComponent* Inventory);
     
     // 식별 대기열
     TArray<FName> ItemsToExamine;
+
+    UPROPERTY()
+    UGridInventoryComponent* ActiveExamineInventory = nullptr;
 
     UFUNCTION()
     void GameTimerUpdate();

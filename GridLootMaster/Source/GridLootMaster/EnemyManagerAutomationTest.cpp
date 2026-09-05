@@ -11,6 +11,105 @@
 #include "ItemData.h"
 #include "Map/MapManagerComponent.h"
 
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterEnemyDeathSynchronizesImmediatelyTest,
+    "GridLootMaster.EnemyWorld.DeathSynchronizesWithoutWorldTick",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterEnemyDeathSynchronizesImmediatelyTest::RunTest(const FString& Parameters)
+{
+    AGridGameMode* GameMode = NewObject<AGridGameMode>();
+    if (!GameMode || !GameMode->MapManagerComponent || !GameMode->EnemyManagerComponent || !GameMode->CombatComponent)
+    {
+        return false;
+    }
+
+    // NewObject<AGridGameMode>() does not run the normal raid-start path, so explicitly
+    // initialize the raid values that AttackEnemy()->AddScore()->CheckWinCondition() reads.
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->RemainingTime = FMath::Max(1.0f, GameMode->TotalTimeLimit);
+    GameMode->CurrentScore = 0;
+    GameMode->QuotaScore = FMath::Max(1000, GameMode->QuotaScore);
+    GameMode->CurrentPlayerCoord = FIntPoint(0, 0);
+    GameMode->MapManagerComponent->SpawnPoint = FIntPoint(0, 0);
+    GameMode->MapManagerComponent->InitializeMap();
+    GameMode->EnemyManagerComponent->ResetForRaid();
+
+    FEnemyDefinition Enemy;
+    Enemy.EnemyID = TEXT("ImmediateDeathEnemy");
+    Enemy.MaxHealth = 10;
+    Enemy.Armor = 0;
+    Enemy.Reward = 100;
+    Enemy.VisionRangeTiles = 2;
+    Enemy.DetectionPower = 100;
+
+    const bool bSpawned = GameMode->EnemyManagerComponent->SpawnEnemyAt(
+        Enemy,
+        FIntPoint(1, 0),
+        EEnemyBehaviorProfile::GuardZone);
+
+    TestTrue(TEXT("Enemy is spawned at the combat contact tile"), bSpawned);
+    if (!bSpawned)
+    {
+        return false;
+    }
+
+    const TArray<FEnemyWorldInstance>& SpawnedEnemies =
+        GameMode->EnemyManagerComponent->GetEnemyInstances();
+
+    TestEqual(TEXT("Exactly one test enemy exists"), SpawnedEnemies.Num(), 1);
+    if (SpawnedEnemies.Num() != 1)
+    {
+        return false;
+    }
+
+    GameMode->AdvanceRaidWorldTick();
+
+    TestTrue(
+        TEXT("Enemy contact is active before the kill"),
+        GameMode->CombatComponent->bHasActiveEnemy);
+
+    if (!GameMode->CombatComponent->bHasActiveEnemy)
+    {
+        return false;
+    }
+
+    const FIntPoint DeathCoord =
+        GameMode->EnemyManagerComponent->GetEnemyInstances()[0].Coordinate;
+
+    const bool bAttackSucceeded = GameMode->CombatComponent->AttackEnemy(10);
+    TestTrue(TEXT("The killing attack succeeds"), bAttackSucceeded);
+
+    if (!bAttackSucceeded)
+    {
+        return false;
+    }
+
+    const TArray<FEnemyWorldInstance>& EnemiesAfterKill =
+        GameMode->EnemyManagerComponent->GetEnemyInstances();
+
+    TestEqual(
+        TEXT("World enemy instance is preserved after death"),
+        EnemiesAfterKill.Num(),
+        1);
+
+    if (EnemiesAfterKill.Num() != 1)
+    {
+        return false;
+    }
+
+    const FEnemyWorldInstance& WorldEnemy = EnemiesAfterKill[0];
+
+    TestFalse(TEXT("World enemy is dead immediately"), WorldEnemy.bAlive);
+    TestEqual(TEXT("World enemy state is Dead immediately"), WorldEnemy.WorldState, EEnemyWorldState::Dead);
+    TestFalse(TEXT("Dead enemy no longer occupies its tile"), GameMode->EnemyManagerComponent->HasEnemyAt(DeathCoord));
+    TestEqual(TEXT("Combat contact is cleared immediately"),
+        GameMode->EnemyManagerComponent->GetActiveEnemyInstanceID(), NAME_None);
+
+    return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FGridLootMasterEnemyWorldSpawnValidationTest,
     "GridLootMaster.EnemyWorld.SpawnValidation",

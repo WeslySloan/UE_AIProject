@@ -18,6 +18,9 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "Inventory")
     UGridInventoryComponent* InventoryComponent;
 
+    UPROPERTY(BlueprintReadWrite, Category = "Inventory")
+    int32 SectionIndex = 0;
+
     UPROPERTY()
     class UItemInstance* PendingSplitItem;
     
@@ -26,6 +29,7 @@ public:
 
     int32 PendingSplitX;
     int32 PendingSplitY;
+    int32 PendingSplitSectionIndex = 0;
 
     UFUNCTION()
     void OnSplitDragConfirmed(int32 SplitAmount);

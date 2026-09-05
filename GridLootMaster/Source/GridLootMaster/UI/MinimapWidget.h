@@ -54,6 +54,7 @@ public:
     void ApplySharedMovementState(FIntPoint InPlayerCoord, FIntPoint InTargetCoord,
         const TArray<FIntPoint>& InPath, int32 InMoveProgress);
     void ResetMovement();
+    void SetPlayerCoordinateForCombat(FIntPoint NewCoordinate);
     void HandleTileClicked(FIntPoint ClickedCoord);
     void RefreshEnemyDebugMarkers();
 

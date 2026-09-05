@@ -302,8 +302,9 @@ void UDraggableItemWidget::OnAutoSplitConfirmed(int32 SplitAmount)
     SplitAmount = FMath::Clamp(SplitAmount, 1, MaxSplitAmount);
 
     FIntPoint Size = ItemObj->GetCurrentSize();
+    int32 FreeSection = INDEX_NONE;
     int32 FreeX, FreeY;
-    if (SourceInventory->FindEmptySpace(Size.X, Size.Y, FreeX, FreeY))
+    if (SourceInventory->FindEmptySpaceAcrossSections(Size.X, Size.Y, FreeSection, FreeX, FreeY))
     {
         // 1. 기존 아이템 수량 차감
         ItemObj->CurrentStack -= SplitAmount;
@@ -333,7 +334,7 @@ void UDraggableItemWidget::OnAutoSplitConfirmed(int32 SplitAmount)
         NewItem->EquippedMagazine = ItemObj->EquippedMagazine;
 
         // 3. 인벤토리에 추가 (자동으로 브로드캐스트 안될수있으므로 수동호출)
-        if (!SourceInventory->AddItem(NewItem, FreeX, FreeY))
+        if (!SourceInventory->AddItemToSection(NewItem, FreeSection, FreeX, FreeY))
         {
             ItemObj->CurrentStack += SplitAmount;
             return;
@@ -380,6 +381,7 @@ void UDraggableItemWidget::NativeOnDragDetected(const FGeometry& InGeometry, con
     DragDropOp->OriginalWidget = this; 
     DragDropOp->bIsSplitDrag = InMouseEvent.IsShiftDown() && (ItemObj->CurrentStack > 1);
     DragDropOp->SourceInventory = SourceInventory;
+    DragDropOp->SourceSectionIndex = SourceSectionIndex;
     
     FVector2D TopLeftScreenPos = InGeometry.GetAbsolutePosition();
     DragDropOp->MouseOffset = InMouseEvent.GetScreenSpacePosition() - TopLeftScreenPos;
@@ -408,22 +410,10 @@ FReply UDraggableItemWidget::NativeOnKeyDown(const FGeometry& InGeometry, const 
                 return FReply::Handled();
             }
 
+            int32 CurrentSection = INDEX_NONE;
             int32 CurrentX = INDEX_NONE;
             int32 CurrentY = INDEX_NONE;
-            for (int32 Y = 0; Y < SourceInventory->GridHeight && CurrentY == INDEX_NONE; ++Y)
-            {
-                for (int32 X = 0; X < SourceInventory->GridWidth; ++X)
-                {
-                    const int32 CellIndex = SourceInventory->GetIndex(X, Y);
-                    if (SourceInventory->IsValidIndex(CellIndex) &&
-                        SourceInventory->GridCells[CellIndex] == ItemObj->InstanceID)
-                    {
-                        CurrentX = X;
-                        CurrentY = Y;
-                        break;
-                    }
-                }
-            }
+            SourceInventory->FindItemPlacement(ItemObj->InstanceID, CurrentSection, CurrentX, CurrentY);
 
             if (CurrentX == INDEX_NONE || CurrentY == INDEX_NONE)
             {
@@ -431,7 +421,7 @@ FReply UDraggableItemWidget::NativeOnKeyDown(const FGeometry& InGeometry, const 
             }
 
             const FIntPoint RotatedSize(ItemObj->GetCurrentSize().Y, ItemObj->GetCurrentSize().X);
-            if (!SourceInventory->CheckItemFit(ItemObj->InstanceID, CurrentX, CurrentY, RotatedSize.X, RotatedSize.Y))
+            if (!SourceInventory->CheckItemFitInSection(ItemObj->InstanceID, CurrentSection, CurrentX, CurrentY, RotatedSize.X, RotatedSize.Y))
             {
                 return FReply::Handled();
             }
@@ -469,15 +459,16 @@ void UDraggableItemWidget::HandleUnloadItem(UItemInstance* TargetItem)
     {
         UItemInstance* MagItem = TargetItem->EquippedMagazine;
         
+        int32 FreeSection = INDEX_NONE;
         int32 FreeX, FreeY;
         bool bAdded = false;
-        if (SourceInventory && SourceInventory->FindEmptySpace(MagItem->GetCurrentSize().X, MagItem->GetCurrentSize().Y, FreeX, FreeY))
+        if (SourceInventory && SourceInventory->FindEmptySpaceAcrossSections(MagItem->GetCurrentSize().X, MagItem->GetCurrentSize().Y, FreeSection, FreeX, FreeY))
         {
-            bAdded = SourceInventory->AddItem(MagItem, FreeX, FreeY);
+            bAdded = SourceInventory->AddItemToSection(MagItem, FreeSection, FreeX, FreeY);
         }
-        else if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpace(MagItem->GetCurrentSize().X, MagItem->GetCurrentSize().Y, FreeX, FreeY))
+        else if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpaceAcrossSections(MagItem->GetCurrentSize().X, MagItem->GetCurrentSize().Y, FreeSection, FreeX, FreeY))
         {
-            bAdded = GM->InventoryComponent->AddItem(MagItem, FreeX, FreeY);
+            bAdded = GM->InventoryComponent->AddItemToSection(MagItem, FreeSection, FreeX, FreeY);
         }
 
         if (bAdded)
@@ -516,15 +507,16 @@ void UDraggableItemWidget::HandleUnloadItem(UItemInstance* TargetItem)
             NewAmmo->bIsExamined = true;
             NewAmmo->bIsRotated = false;
 
+            int32 FreeSection = INDEX_NONE;
             int32 FreeX, FreeY;
             bool bAdded = false;
-            if (SourceInventory && SourceInventory->FindEmptySpace(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeX, FreeY))
+            if (SourceInventory && SourceInventory->FindEmptySpaceAcrossSections(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeSection, FreeX, FreeY))
             {
-                bAdded = SourceInventory->AddItem(NewAmmo, FreeX, FreeY);
+                bAdded = SourceInventory->AddItemToSection(NewAmmo, FreeSection, FreeX, FreeY);
             }
-            else if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpace(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeX, FreeY))
+            else if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpaceAcrossSections(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeSection, FreeX, FreeY))
             {
-                bAdded = GM->InventoryComponent->AddItem(NewAmmo, FreeX, FreeY);
+                bAdded = GM->InventoryComponent->AddItemToSection(NewAmmo, FreeSection, FreeX, FreeY);
             }
 
             if (!bAdded) break;

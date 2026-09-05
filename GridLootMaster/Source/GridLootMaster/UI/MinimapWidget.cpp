@@ -78,7 +78,7 @@ void UMinimapWidget::InitMinimap(UMapManagerComponent* InMapManager, bool bInCom
 
     // 맵 렌더링을 위한 패널
     MapGridPanel = WidgetTree->ConstructWidget<UUniformGridPanel>(UUniformGridPanel::StaticClass());
-    MapGridPanel->SetSlotPadding(FMargin(1.0f));
+    MapGridPanel->SetSlotPadding(FMargin(0.0f));
     MapGridPanel->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
     
     if (UVerticalBoxSlot* MapSlot = Cast<UVerticalBoxSlot>(RootBox->AddChild(MapGridPanel)))
@@ -109,7 +109,9 @@ void UMinimapWidget::InitMinimap(UMapManagerComponent* InMapManager, bool bInCom
     for (const FTileData& TileData : MapManager->MapGrid)
     {
         UMinimapTileWidget* TileWidget = WidgetTree->ConstructWidget<UMinimapTileWidget>(UMinimapTileWidget::StaticClass());
-        TileWidget->InitTile(TileData, this, bCompactMode ? 24.0f : 64.0f);
+        TileWidget->InitTile(TileData, this, bCompactMode ? 24.0f : 68.0f,
+            true,
+            true);
 
         UUniformGridSlot* GridSlot = MapGridPanel->AddChildToUniformGrid(TileWidget, TileData.Coordinate.Y, TileData.Coordinate.X);
         GridSlot->SetHorizontalAlignment(HAlign_Fill);
@@ -128,9 +130,6 @@ void UMinimapWidget::InitMinimap(UMapManagerComponent* InMapManager, bool bInCom
 
 void UMinimapWidget::RefreshEnemyDebugMarkers()
 {
-#if UE_BUILD_SHIPPING
-    return;
-#else
     AGridGameMode* GM = nullptr;
     if (UWorld* World = GetWorld())
     {
@@ -144,24 +143,33 @@ void UMinimapWidget::RefreshEnemyDebugMarkers()
     {
         return;
     }
+    TSet<FIntPoint> AliveMarkerTiles;
     for (const FEnemyWorldInstance& Enemy : GM->EnemyManagerComponent->GetEnemyInstances())
     {
-        if (!Enemy.bAlive) continue;
+        if (!Enemy.bAlive || Enemy.WorldState == EEnemyWorldState::Dead) continue;
         if (UMinimapTileWidget** Tile = TileWidgets.Find(Enemy.Coordinate))
         {
+            AliveMarkerTiles.Add(Enemy.Coordinate);
             const bool bAmbusher = Enemy.BehaviorProfile == EEnemyBehaviorProfile::Ambusher;
             const FString Marker = bAmbusher ? TEXT("A") : TEXT("E");
-            const FLinearColor Color = bAmbusher
-                ? FLinearColor(1.0f, 0.45f, 0.02f, 0.95f)
-                : FLinearColor(0.9f, 0.05f, 0.02f, 0.95f);
-            const FString Tooltip = FString::Printf(TEXT("%s %s @ %d-%d | %s"),
-                *Enemy.Definition.DisplayName, *Enemy.InstanceID.ToString(),
-                Enemy.Coordinate.X, Enemy.Coordinate.Y,
+            const FLinearColor Color = bAmbusher ? FLinearColor(1.0f, 0.45f, 0.02f, 0.95f) : FLinearColor(0.9f, 0.05f, 0.02f, 0.95f);
+            const FString Tooltip = FString::Printf(TEXT("%s %s @ %d-%d | %s"), *Enemy.Definition.DisplayName,
+                *Enemy.InstanceID.ToString(), Enemy.Coordinate.X, Enemy.Coordinate.Y,
                 *UEnum::GetValueAsString(Enemy.KnowledgeState));
             (*Tile)->SetEnemyDebugMarker(true, Marker, Color, Tooltip);
         }
     }
-#endif
+    for (const FEnemyWorldInstance& Enemy : GM->EnemyManagerComponent->GetEnemyInstances())
+    {
+        if (Enemy.bAlive || Enemy.WorldState != EEnemyWorldState::Dead || AliveMarkerTiles.Contains(Enemy.Coordinate)) continue;
+        if (UMinimapTileWidget** Tile = TileWidgets.Find(Enemy.Coordinate))
+        {
+            const FString Tooltip = FString::Printf(TEXT("%s %s @ %d-%d | %s"), *Enemy.Definition.DisplayName,
+                *Enemy.InstanceID.ToString(), Enemy.Coordinate.X, Enemy.Coordinate.Y,
+                *UEnum::GetValueAsString(Enemy.KnowledgeState));
+            (*Tile)->SetEnemyDebugMarker(true, TEXT("D"), FLinearColor(0.25f, 0.25f, 0.25f, 0.95f), Tooltip);
+        }
+    }
 }
 
 FReply UMinimapWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
@@ -271,6 +279,28 @@ void UMinimapWidget::ResetMovement()
     {
         (*StartTile)->SetHasPlayer(true);
     }
+    PublishMovementState();
+}
+
+void UMinimapWidget::SetPlayerCoordinateForCombat(FIntPoint NewCoordinate)
+{
+    if (UMinimapTileWidget** OldTile = TileWidgets.Find(CurrentPlayerCoord))
+    {
+        (*OldTile)->SetHasPlayer(false);
+    }
+
+    CurrentPlayerCoord = NewCoordinate;
+    CurrentTargetCoord = NewCoordinate;
+    CurrentPath.Empty();
+    CurrentMoveProgress = 0;
+
+    if (UMinimapTileWidget** NewTile = TileWidgets.Find(CurrentPlayerCoord))
+    {
+        (*NewTile)->SetHasPlayer(true);
+    }
+
+    UpdatePathHighlight();
+    UpdateAdvanceButtonText();
     PublishMovementState();
 }
 

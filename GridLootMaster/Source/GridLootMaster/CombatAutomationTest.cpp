@@ -283,7 +283,8 @@ bool FGridLootMasterCombatReloadTransactionTest::RunTest(const FString& Paramete
 {
     AGridGameMode* GameMode = NewObject<AGridGameMode>();
     TestNotNull(TEXT("A game mode is created for reload"), GameMode);
-    if (!GameMode || !GameMode->EquipmentComponent || !GameMode->InventoryComponent || !GameMode->CombatComponent)
+    if (!GameMode || !GameMode->EquipmentComponent || !GameMode->InventoryComponent ||
+        !GameMode->RigComponent || !GameMode->PocketComponent || !GameMode->CombatComponent)
     {
         return false;
     }
@@ -291,12 +292,15 @@ bool FGridLootMasterCombatReloadTransactionTest::RunTest(const FString& Paramete
     GameMode->RaidState = ERaidState::InRaid;
     GameMode->EquipmentComponent->ClearEquipment();
     GameMode->InventoryComponent->InitializeGrid(4, 1);
+    GameMode->RigComponent->InitializeSections({ FIntPoint(1, 2), FIntPoint(1, 2) });
+    GameMode->PocketComponent->InitializeGrid(2, 2);
 
     UItemInstance* Weapon = NewObject<UItemInstance>(GameMode);
     Weapon->InstanceID = TEXT("ReloadWeapon");
     Weapon->ItemName = TEXT("Reload Weapon");
     Weapon->Category = EItemCategory::Weapon;
     Weapon->WeaponAttackType = EWeaponAttackType::Firearm;
+    Weapon->CompatibleAmmo = TEXT("5.56");
     Weapon->Damage = 10;
     Weapon->ReloadTimeSeconds = 0.8f;
 
@@ -319,7 +323,18 @@ bool FGridLootMasterCombatReloadTransactionTest::RunTest(const FString& Paramete
     Ammo->BaseSize = FIntPoint(1, 1);
     Ammo->CurrentStack = 4;
     Ammo->MaxStack = 30;
-    TestTrue(TEXT("Compatible ammo is placed in inventory"),
+    UItemInstance* SpareMagazine = NewObject<UItemInstance>(GameMode);
+    SpareMagazine->InstanceID = TEXT("ReloadSpareMagazine");
+    SpareMagazine->Category = EItemCategory::Attachment;
+    SpareMagazine->AttachmentType = EAttachmentType::Magazine;
+    SpareMagazine->CompatibleAmmo = TEXT("5.56");
+    SpareMagazine->BaseSize = FIntPoint(1, 2);
+    SpareMagazine->MaxAmmo = 5;
+    SpareMagazine->CurrentAmmo = 5;
+    TestTrue(TEXT("Compatible spare magazine is placed in a later rig section"),
+        GameMode->RigComponent->AddItemToSection(SpareMagazine, 1, 0, 0));
+
+    TestTrue(TEXT("Loose ammo remains available in the backpack"),
         GameMode->InventoryComponent->AddItem(Ammo, 0, 0));
 
     GameMode->CombatComponent->ActiveWeaponSlot = TEXT("Primary1");
@@ -335,9 +350,19 @@ bool FGridLootMasterCombatReloadTransactionTest::RunTest(const FString& Paramete
     GameMode->CombatComponent->AdvanceCombatTimeForTest(0.79f);
     TestEqual(TEXT("Reload remains pending before its delay expires"), Magazine->CurrentAmmo, 1);
     GameMode->CombatComponent->AdvanceCombatTimeForTest(0.01f);
-    TestEqual(TEXT("Reload fills only the available magazine capacity"), Magazine->CurrentAmmo, 5);
-    TestNull(TEXT("Fully consumed ammo is removed from inventory"),
-        GameMode->InventoryComponent->GetItemInstance(Ammo->InstanceID));
+    TestEqual(TEXT("Reload swaps to the selected spare magazine"), Weapon->EquippedMagazine, SpareMagazine);
+    TestEqual(TEXT("The former magazine moves into the spare magazine slot"),
+        GameMode->RigComponent->GetItemInstance(Magazine->InstanceID), Magazine);
+    int32 FormerMagazineSection = INDEX_NONE;
+    int32 FormerMagazineX = INDEX_NONE;
+    int32 FormerMagazineY = INDEX_NONE;
+    TestTrue(TEXT("The former magazine has a placement after reload"),
+        GameMode->RigComponent->FindItemPlacement(Magazine->InstanceID,
+            FormerMagazineSection, FormerMagazineX, FormerMagazineY));
+    TestEqual(TEXT("The former magazine returns to the selected later rig section"), FormerMagazineSection, 1);
+    TestEqual(TEXT("The former magazine returns to the selected X coordinate"), FormerMagazineX, 0);
+    TestEqual(TEXT("The former magazine returns to the selected Y coordinate"), FormerMagazineY, 0);
+    TestEqual(TEXT("Loose ammo is not consumed by magazine swap"), Ammo->CurrentStack, 4);
     TestEqual(TEXT("Reload action returns to idle"),
         GameMode->CombatComponent->PlayerActionState, ECombatPlayerActionState::None);
     return true;
@@ -552,11 +577,10 @@ bool FGridLootMasterCombatUIFlowTest::RunTest(const FString& Parameters)
     UI->ShowEventNotification(TEXT(""));
 
     UI->MinimapUI->HandleTileClicked(FIntPoint(1, 0));
-    TestTrue(TEXT("Destination selection is shown in the top notification"),
-        UI->EventNotificationText && UI->EventNotificationText->GetVisibility() == ESlateVisibility::Visible &&
-        UI->EventNotificationText->GetText().ToString().Contains(TEXT("목적지 선택")));
-    TestTrue(TEXT("Destination notification parent banner is visible"),
-        UI->EventNotificationBorder && UI->EventNotificationBorder->GetVisibility() == ESlateVisibility::Visible);
+    TestTrue(TEXT("Destination selection is recorded in the event log"),
+        UI->EventLogEntries.Num() > 0 && UI->EventLogEntries.Last().Contains(TEXT("목적지 선택")));
+    TestTrue(TEXT("Destination top toast remains disabled"),
+        UI->EventNotificationBorder && UI->EventNotificationBorder->GetVisibility() != ESlateVisibility::Visible);
     UI->MinimapUI->ResetMovement();
     UI->ShowEventNotification(TEXT(""));
 
@@ -571,16 +595,19 @@ bool FGridLootMasterCombatUIFlowTest::RunTest(const FString& Parameters)
     GameMode->CombatComponent->SpawnEnemy(Enemy);
     TestTrue(TEXT("Enemy appearance is shown in combat text"),
         UI->CombatText->GetText().ToString().Contains(TEXT("적이 나타났다!!")));
-    TestTrue(TEXT("Enemy appearance is shown in the top event notification"),
-        UI->EventNotificationText && UI->EventNotificationText->GetVisibility() == ESlateVisibility::Visible &&
-        UI->EventNotificationText->GetText().ToString().Contains(TEXT("적이 나타났다!!")));
+    TestTrue(TEXT("Enemy appearance is recorded in the event log"),
+        UI->EventLogEntries.Num() > 0 && UI->EventLogEntries.Last().Contains(TEXT("적이 나타났다!!")));
 
     UI->ShowEventNotification(TEXT(""));
     UI->QueueEventNotification(TEXT("First event"));
     UI->QueueEventNotification(TEXT("Second event"));
-    TestTrue(TEXT("The first queued event is displayed immediately"),
-        UI->EventNotificationText->GetText().ToString() == TEXT("First event"));
-    TestEqual(TEXT("The second event remains queued"), UI->PendingEventNotifications.Num(), 1);
+    bool bFirstEventRecorded = false;
+    for (const FString& Entry : UI->EventLogEntries)
+    {
+        bFirstEventRecorded |= Entry.Contains(TEXT("First event"));
+    }
+    TestTrue(TEXT("The first event is recorded in the event log"), bFirstEventRecorded);
+    TestEqual(TEXT("Top toast queue remains disabled"), UI->PendingEventNotifications.Num(), 0);
     UI->ShowEventNotification(TEXT(""));
 
     TestTrue(TEXT("Player attack is shown in combat text"), GameMode->CombatComponent->AttackEnemy(10));
@@ -703,16 +730,14 @@ bool FGridLootMasterSearchFailureNotificationTest::RunTest(const FString& Parame
 
     GameMode->SearchPhaseCompleteForTest();
 
-    TestTrue(TEXT("A missing loot table shows a search failure notification"),
-        MainUI->EventNotificationText->GetVisibility() == ESlateVisibility::Visible &&
-        MainUI->EventNotificationText->GetText().ToString().Contains(TEXT("탐색 데이터를")));
+    TestTrue(TEXT("A missing loot table shows a search failure in the event log"),
+        MainUI->EventLogEntries.Num() > 0 && MainUI->EventLogEntries.Last().Contains(TEXT("탐색 데이터를")));
 
     GameMode->RaidState = ERaidState::Lobby;
     MainUI->ShowEventNotification(TEXT(""));
     GameMode->StartContainerSearch();
-    TestTrue(TEXT("Searching outside a raid shows a reason"),
-        MainUI->EventNotificationText->GetVisibility() == ESlateVisibility::Visible &&
-        MainUI->EventNotificationText->GetText().ToString().Contains(TEXT("레이드 중에만 컨테이너")));
+    TestTrue(TEXT("Searching outside a raid shows a reason in the event log"),
+        MainUI->EventLogEntries.Num() > 0 && MainUI->EventLogEntries.Last().Contains(TEXT("레이드 중에만 컨테이너")));
 
     GameMode->ItemDataTable = PreviousItemDataTable;
     GameMode->RaidState = PreviousRaidState;
@@ -791,9 +816,8 @@ bool FGridLootMasterSearchRejectsMalformedContainerTest::RunTest(const FString& 
 
     GameMode->SearchPhaseCompleteForTest();
 
-    TestTrue(TEXT("Malformed container grid is rejected with a notification"),
-        MainUI->EventNotificationText->GetVisibility() == ESlateVisibility::Visible &&
-        MainUI->EventNotificationText->GetText().ToString().Contains(TEXT("컨테이너를 사용할 수")));
+    TestTrue(TEXT("Malformed container grid is rejected with an event log entry"),
+        MainUI->EventLogEntries.Num() > 0 && MainUI->EventLogEntries.Last().Contains(TEXT("컨테이너를 사용할 수")));
 
     GameMode->LootContainerComponent->GridWidth = PreviousGridWidth;
     GameMode->LootContainerComponent->GridHeight = PreviousGridHeight;
@@ -907,16 +931,15 @@ bool FGridLootMasterCombatActionAvailabilityTest::RunTest(const FString& Paramet
         UI->ShowEventNotification(TEXT(""));
         UI->MinimapUI->OnPlayerMoved.Broadcast(GameMode->CurrentPlayerCoord);
         TestTrue(TEXT("Extract is enabled on an extraction point"), UI->ExtractBtn->GetIsEnabled());
-        TestTrue(TEXT("Extraction arrival is shown in the top event notification"),
-            UI->EventNotificationText && UI->EventNotificationText->GetVisibility() == ESlateVisibility::Visible &&
-            UI->EventNotificationText->GetText().ToString().Contains(TEXT("탈출 지점에 도착")));
+        TestTrue(TEXT("Extraction arrival is recorded in the event log"),
+            UI->EventLogEntries.Num() > 0 && UI->EventLogEntries.Last().Contains(TEXT("탈출 지점에 도착")));
 
         GameMode->CurrentPlayerCoord = GameMode->MapManagerComponent->SpawnPoint;
         if (ActiveUI) ActiveUI->ShowEventNotification(TEXT(""));
         GameMode->ExtractRaid();
-        TestTrue(TEXT("Extraction outside the extraction point shows a reason"),
-            ActiveUI && ActiveUI->EventNotificationText &&
-            ActiveUI->EventNotificationText->GetText().ToString().Contains(TEXT("탈출 지점에서만")));
+        TestTrue(TEXT("Extraction outside the extraction point shows a reason in the event log"),
+            ActiveUI && ActiveUI->EventLogEntries.Num() > 0 &&
+            ActiveUI->EventLogEntries.Last().Contains(TEXT("탈출 지점에서만")));
     }
     UI->RightPanelSwitcher->SetActiveWidgetIndex(2);
     UI->UpdateActionAvailability();
@@ -1503,9 +1526,8 @@ bool FGridLootMasterBangHandlerTest::RunTest(const FString& Parameters)
     UI->ShowEventNotification(TEXT(""));
     UI->OnBangButtonClicked();
     TestEqual(TEXT("BANG handler does not consume ammo when the magazine is empty"), Magazine->CurrentAmmo, 0);
-    TestTrue(TEXT("Empty magazine shows a combat notification"),
-        UI->EventNotificationText && UI->EventNotificationText->GetVisibility() == ESlateVisibility::Visible &&
-        UI->EventNotificationText->GetText().ToString().Contains(TEXT("탄약이 없습니다")));
+    TestTrue(TEXT("Empty magazine shows a combat event log entry"),
+        UI->EventLogEntries.Num() > 0 && UI->EventLogEntries.Last().Contains(TEXT("탄약이 없습니다")));
 
     GameMode->CombatComponent->ClearEnemy();
     GameMode->EquipmentComponent->RemoveItemBySlotID(TEXT("Primary1"));

@@ -63,6 +63,14 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
     UItemDragDropOperation* ItemDropOp = Cast<UItemDragDropOperation>(InOperation);
     if (ItemDropOp && ItemDropOp->ItemObj && InventoryComponent)
     {
+        if (ItemDropOp->SourceEquipmentSlot == TEXT("Backpack") || ItemDropOp->SourceEquipmentSlot == TEXT("Rig"))
+        {
+            if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+            {
+                return GM->TryStandaloneStorageUnequip(ItemDropOp->SourceEquipmentSlot, ItemDropOp->ItemObj);
+            }
+            return false;
+        }
         int32 GridX = 0;
         int32 GridY = 0;
 
@@ -77,6 +85,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
             {
                 PendingSplitItem = ItemDropOp->ItemObj;
                 PendingSplitSourceInv = ItemDropOp->SourceInventory;
+                PendingSplitSectionIndex = SectionIndex;
                 PendingSplitX = GridX;
                 PendingSplitY = GridY;
                 
@@ -96,12 +105,11 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
             }
 
             // 1. 해당 칸에 이미 동일한 종류의 아이템이 있는지 (병합 가능 여부 확인)
-            if (GridX >= 0 && GridX < InventoryComponent->GridWidth && GridY >= 0 && GridY < InventoryComponent->GridHeight)
+            if (InventoryComponent->IsValidSection(SectionIndex))
             {
-                int32 TargetIndex = InventoryComponent->GetIndex(GridX, GridY);
-                if (InventoryComponent->IsValidIndex(TargetIndex))
+                if (InventoryComponent->IsValidSectionIndex(SectionIndex, GridX + GridY * InventoryComponent->GetSectionSize(SectionIndex).X))
                 {
-                    FName ExistingItem = InventoryComponent->GridCells[TargetIndex];
+                    FName ExistingItem = InventoryComponent->GetCellItemID(SectionIndex, GridX, GridY);
                     if (ExistingItem != NAME_None && ExistingItem != ItemDropOp->ItemID)
                     {
                         UItemInstance* ExistingItemObj = InventoryComponent->GetItemInstance(ExistingItem);
@@ -286,7 +294,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
             }
 
             // 2. 병합이 아니면 빈 공간 이동 처리
-            if (InventoryComponent->CheckItemFit(ItemDropOp->ItemID, GridX, GridY, Width, Height))
+            if (InventoryComponent->CheckItemFitInSection(ItemDropOp->ItemID, SectionIndex, GridX, GridY, Width, Height))
             {
                 AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
                 bool bMoved = false;
@@ -300,7 +308,7 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                 // 다른 인벤토리에서 이동할 때는 대상 추가를 먼저 성공시킨 뒤 원본을 제거합니다.
                 if (ItemDropOp->SourceInventory && ItemDropOp->SourceInventory != InventoryComponent)
                 {
-                    bMoved = InventoryComponent->AddItem(ItemDropOp->ItemObj, GridX, GridY);
+                    bMoved = InventoryComponent->AddItemToSection(ItemDropOp->ItemObj, SectionIndex, GridX, GridY);
                     if (bMoved)
                     {
                         if (!ItemDropOp->SourceInventory->RemoveItem(ItemDropOp->ItemID))
@@ -312,29 +320,17 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                 }
                 else if (ItemDropOp->SourceInventory == InventoryComponent)
                 {
+                    int32 OriginalSection = INDEX_NONE;
                     int32 OriginalX = INDEX_NONE;
                     int32 OriginalY = INDEX_NONE;
-                    for (int32 Y = 0; Y < InventoryComponent->GridHeight && OriginalY == INDEX_NONE; ++Y)
-                    {
-                        for (int32 X = 0; X < InventoryComponent->GridWidth; ++X)
-                        {
-                            const int32 OriginalIndex = InventoryComponent->GetIndex(X, Y);
-                            if (InventoryComponent->IsValidIndex(OriginalIndex) &&
-                                InventoryComponent->GridCells[OriginalIndex] == ItemDropOp->ItemID)
-                            {
-                                OriginalX = X;
-                                OriginalY = Y;
-                                break;
-                            }
-                        }
-                    }
+                    InventoryComponent->FindItemPlacement(ItemDropOp->ItemID, OriginalSection, OriginalX, OriginalY);
 
                     const bool bSourceRemoved = InventoryComponent->RemoveItem(ItemDropOp->ItemID);
-                    bMoved = bSourceRemoved && InventoryComponent->AddItem(ItemDropOp->ItemObj, GridX, GridY);
+                    bMoved = bSourceRemoved && InventoryComponent->AddItemToSection(ItemDropOp->ItemObj, SectionIndex, GridX, GridY);
                     if (!bMoved && OriginalX != INDEX_NONE)
                     {
                         // 새 위치 수납 실패 시 원래 위치로 복구합니다.
-                        InventoryComponent->AddItem(ItemDropOp->ItemObj, OriginalX, OriginalY);
+                        InventoryComponent->AddItemToSection(ItemDropOp->ItemObj, OriginalSection, OriginalX, OriginalY);
                     }
                 }
                 else
@@ -359,6 +355,11 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                         FindUnknownSource(GM->RigComponent);
                         FindUnknownSource(GM->PocketComponent);
                         FindUnknownSource(GM->StashComponent);
+                        if (!UnknownSourceInventory)
+                        {
+                            UnknownSourceInventory = GM->FindCorpseLootInventory(ItemDropOp->ItemID, UnknownSourceInventory)
+                                ? UnknownSourceInventory : nullptr;
+                        }
 
                         if (!UnknownSourceInventory && GM->EquipmentComponent)
                         {
@@ -377,9 +378,13 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                     {
                         return false;
                     }
+                    if (SourceEquipmentSlot == TEXT("Backpack") || SourceEquipmentSlot == TEXT("Rig"))
+                    {
+                        return GM && GM->TryStandaloneStorageUnequip(SourceEquipmentSlot, ItemDropOp->ItemObj);
+                    }
 
                     // 출처가 없는 드래그도 대상 추가를 먼저 성공시켜 실패 시 원본을 보존합니다.
-                    bMoved = InventoryComponent->AddItem(ItemDropOp->ItemObj, GridX, GridY);
+                    bMoved = InventoryComponent->AddItemToSection(ItemDropOp->ItemObj, SectionIndex, GridX, GridY);
                     if (bMoved)
                     {
                         if (UnknownSourceInventory)
@@ -444,7 +449,7 @@ bool UGridBoardWidget::NativeOnDragOver(const FGeometry& InGeometry, const FDrag
             int32 Width = ItemSize.X;
             int32 Height = ItemSize.Y;
 
-            bool bFits = InventoryComponent->CheckItemFit(ItemDropOp->ItemID, GridX, GridY, Width, Height);
+            bool bFits = InventoryComponent->CheckItemFitInSection(ItemDropOp->ItemID, SectionIndex, GridX, GridY, Width, Height);
 
             PreviewBorder->SetVisibility(ESlateVisibility::HitTestInvisible);
             PreviewBorder->SetBrushColor(bFits ? FLinearColor(0.0f, 1.0f, 0.0f, 0.4f) : FLinearColor(1.0f, 0.0f, 0.0f, 0.4f));
@@ -492,6 +497,8 @@ void UGridBoardWidget::RefreshGridUI()
 {
     if (!GridCanvas || !InventoryComponent) return;
 
+    const FIntPoint SectionSize = InventoryComponent->GetSectionSize(SectionIndex);
+
     for (int32 i = GridCanvas->GetChildrenCount() - 1; i >= 0; --i)
     {
         UWidget* Child = GridCanvas->GetChildAt(i);
@@ -503,14 +510,14 @@ void UGridBoardWidget::RefreshGridUI()
     {
         if (UCanvasPanelSlot* BGSlot = Cast<UCanvasPanelSlot>(BackgroundBorder->Slot))
         {
-            BGSlot->SetSize(FVector2D(InventoryComponent->GridWidth * 64.0f, InventoryComponent->GridHeight * 64.0f));
+            BGSlot->SetSize(FVector2D(SectionSize.X * 64.0f, SectionSize.Y * 64.0f));
         }
     }
 
     if (RootSizeBox)
     {
-        RootSizeBox->SetWidthOverride(InventoryComponent->GridWidth * 64.0f);
-        RootSizeBox->SetHeightOverride(InventoryComponent->GridHeight * 64.0f);
+        RootSizeBox->SetWidthOverride(SectionSize.X * 64.0f);
+        RootSizeBox->SetHeightOverride(SectionSize.Y * 64.0f);
     }
 
     if (GridCanvas && GridCanvas->GetChildrenCount() > 0)
@@ -520,14 +527,14 @@ void UGridBoardWidget::RefreshGridUI()
             if (UCanvasPanelSlot* HitSlot = Cast<UCanvasPanelSlot>(HitTestBGWidget->Slot))
             {
                 HitSlot->SetAnchors(FAnchors(0.0f, 0.0f, 0.0f, 0.0f)); // 자동 확장을 막음
-                HitSlot->SetSize(FVector2D(InventoryComponent->GridWidth * 64.0f, InventoryComponent->GridHeight * 64.0f));
+                HitSlot->SetSize(FVector2D(SectionSize.X * 64.0f, SectionSize.Y * 64.0f));
             }
         }
     }
 
-    for (int Y = 0; Y < InventoryComponent->GridHeight; ++Y)
+    for (int Y = 0; Y < SectionSize.Y; ++Y)
     {
-        for (int X = 0; X < InventoryComponent->GridWidth; ++X)
+        for (int X = 0; X < SectionSize.X; ++X)
         {
             UBorder* CellVisual = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
             CellVisual->SetBrushColor(FLinearColor(0.5f, 0.5f, 0.5f, 0.4f));
@@ -541,17 +548,11 @@ void UGridBoardWidget::RefreshGridUI()
 
     TArray<FName> CheckedItems;
 
-    for (int Y = 0; Y < InventoryComponent->GridHeight; ++Y)
+    for (int Y = 0; Y < SectionSize.Y; ++Y)
     {
-        for (int X = 0; X < InventoryComponent->GridWidth; ++X)
+        for (int X = 0; X < SectionSize.X; ++X)
         {
-            int32 Index = InventoryComponent->GetIndex(X, Y);
-            if (!InventoryComponent->IsValidIndex(Index))
-            {
-                continue;
-            }
-
-            FName ItemID = InventoryComponent->GridCells[Index];
+            FName ItemID = InventoryComponent->GetCellItemID(SectionIndex, X, Y);
 
             if (ItemID != NAME_None && !CheckedItems.Contains(ItemID))
             {
@@ -560,6 +561,7 @@ void UGridBoardWidget::RefreshGridUI()
                 UDraggableItemWidget* ItemVisual = WidgetTree->ConstructWidget<UDraggableItemWidget>(UDraggableItemWidget::StaticClass());
                 ItemVisual->ItemObj = InventoryComponent->GetItemInstance(ItemID);
                 ItemVisual->SourceInventory = InventoryComponent;
+                ItemVisual->SourceSectionIndex = SectionIndex;
                 ItemVisual->InitWidgetUI();
                 
                 UCanvasPanelSlot* ItemSlot = GridCanvas->AddChildToCanvas(ItemVisual);
@@ -594,12 +596,11 @@ void UGridBoardWidget::OnSplitDragConfirmed(int32 SplitAmount)
     int32 Height = Size.Y;
 
     // 1. 병합 가능한 타겟 아이템 확인
-    if (PendingSplitX >= 0 && PendingSplitX < InventoryComponent->GridWidth && PendingSplitY >= 0 && PendingSplitY < InventoryComponent->GridHeight)
+    if (InventoryComponent->IsValidSection(PendingSplitSectionIndex))
     {
-        int32 TargetIndex = InventoryComponent->GetIndex(PendingSplitX, PendingSplitY);
-        if (InventoryComponent->IsValidIndex(TargetIndex))
+        if (InventoryComponent->IsValidSectionIndex(PendingSplitSectionIndex, PendingSplitX + PendingSplitY * InventoryComponent->GetSectionSize(PendingSplitSectionIndex).X))
         {
-            FName ExistingItem = InventoryComponent->GridCells[TargetIndex];
+            FName ExistingItem = InventoryComponent->GetCellItemID(PendingSplitSectionIndex, PendingSplitX, PendingSplitY);
             if (ExistingItem != NAME_None && ExistingItem != PendingSplitItem->InstanceID)
             {
                 UItemInstance* TargetObj = InventoryComponent->GetItemInstance(ExistingItem);
@@ -625,7 +626,7 @@ void UGridBoardWidget::OnSplitDragConfirmed(int32 SplitAmount)
     }
 
     // 2. 빈 공간에 새로 아이템 생성하여 이동
-    if (InventoryComponent->CheckItemFit(NAME_None, PendingSplitX, PendingSplitY, Width, Height))
+    if (InventoryComponent->CheckItemFitInSection(NAME_None, PendingSplitSectionIndex, PendingSplitX, PendingSplitY, Width, Height))
     {
         PendingSplitItem->CurrentStack -= SplitAmount;
 
@@ -652,7 +653,7 @@ void UGridBoardWidget::OnSplitDragConfirmed(int32 SplitAmount)
         NewItem->EquippedMuzzle = PendingSplitItem->EquippedMuzzle;
         NewItem->EquippedMagazine = PendingSplitItem->EquippedMagazine;
 
-        if (!InventoryComponent->AddItem(NewItem, PendingSplitX, PendingSplitY))
+        if (!InventoryComponent->AddItemToSection(NewItem, PendingSplitSectionIndex, PendingSplitX, PendingSplitY))
         {
             PendingSplitItem->CurrentStack += SplitAmount;
             return;

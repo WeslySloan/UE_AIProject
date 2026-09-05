@@ -18,6 +18,7 @@
 #include "Components/UniformGridSlot.h"
 #include "MinimapWidget.h"
 #include "GridBoardWidget.h"
+#include "SectionedStorageWidget.h"
 #include "DraggableItemWidget.h"
 #include "EquipmentSlotWidget.h"
 #include "../GridGameMode.h"
@@ -104,7 +105,7 @@ bool UMainGameUI::Initialize()
         UHorizontalBox* RigRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
         AddToVertical(MiddlePanel, RigRow, 20.0f);
         AddToHorizontal(RigRow, CreateEquipSlotEx(RigSlot, TEXT("Rig"), EItemCategory::Rig, TEXT("Chest Rig"), 128.0f, 64.0f)); // 2x1 장비 슬롯
-        RigBoard = WidgetTree->ConstructWidget<UGridBoardWidget>(UGridBoardWidget::StaticClass(), TEXT("RigBoard"));
+        RigBoard = WidgetTree->ConstructWidget<USectionedStorageWidget>(USectionedStorageWidget::StaticClass(), TEXT("RigBoard"));
         AddToHorizontal(RigRow, RigBoard);
 
         // 2. Pocket Row (No Slot)
@@ -121,7 +122,7 @@ bool UMainGameUI::Initialize()
         UHorizontalBox* BackpackRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
         AddToVertical(MiddlePanel, BackpackRow, 20.0f);
         AddToHorizontal(BackpackRow, CreateEquipSlotEx(BackpackSlot, TEXT("Backpack"), EItemCategory::Backpack, TEXT("Backpack"), 128.0f, 192.0f));
-        GridBoard = WidgetTree->ConstructWidget<UGridBoardWidget>(UGridBoardWidget::StaticClass(), TEXT("GridBoard"));
+        GridBoard = WidgetTree->ConstructWidget<USectionedStorageWidget>(USectionedStorageWidget::StaticClass(), TEXT("GridBoard"));
         AddToHorizontal(BackpackRow, GridBoard);
 
         // 4. SafeBox Row
@@ -236,9 +237,9 @@ bool UMainGameUI::Initialize()
 
         EventLogBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("EventLogBorder"));
         EventLogBorder->SetBrushColor(FLinearColor(0.01f, 0.02f, 0.03f, 0.78f));
-        EventLogBorder->SetVisibility(ESlateVisibility::HitTestInvisible);
+        EventLogBorder->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
         EventLogScrollBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("EventLogScrollBox"));
-        EventLogScrollBox->SetVisibility(ESlateVisibility::HitTestInvisible);
+        EventLogScrollBox->SetVisibility(ESlateVisibility::Visible);
         EventLogBorder->AddChild(EventLogScrollBox);
         USizeBox* EventLogSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("EventLogSize"));
         EventLogSize->SetHeightOverride(150.0f);
@@ -297,7 +298,7 @@ bool UMainGameUI::Initialize()
         };
 
         SearchBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SearchBtn"));
-        UTextBlock* SearchBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        SearchBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         SearchBtnText->SetText(FText::FromString(TEXT("SEARCH CONTAINER")));
         SearchBtnText->SetColorAndOpacity(FLinearColor::Black);
         SearchBtn->AddChild(SearchBtnText);
@@ -354,6 +355,49 @@ bool UMainGameUI::Initialize()
         ReloadBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnReloadButtonClicked);
         AddCompactAction(ReloadBtn);
 
+        // Combat Movement v1 is retained for non-player reuse, but is not exposed in the player UI.
+        ApproachBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ApproachButton"));
+        RetreatBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RetreatButton"));
+        ApproachBtn->SetVisibility(ESlateVisibility::Collapsed);
+        RetreatBtn->SetVisibility(ESlateVisibility::Collapsed);
+
+        CombatMoveBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("CombatMoveButton"));
+        UTextBlock* CombatMoveText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        CombatMoveText->SetText(FText::FromString(TEXT("MOVE")));
+        CombatMoveText->SetColorAndOpacity(FLinearColor::Black);
+        CombatMoveBtn->AddChild(CombatMoveText);
+        CombatMoveBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnCombatMoveButtonClicked);
+        AddCompactAction(CombatMoveBtn);
+
+        auto CreateCombatDirectionButton = [&](UButton*& OutButton, const TCHAR* Name, const TCHAR* Label)
+        {
+            OutButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+            UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+            Text->SetText(FText::FromString(Label));
+            Text->SetColorAndOpacity(FLinearColor::Black);
+            OutButton->AddChild(Text);
+            OutButton->SetVisibility(ESlateVisibility::Collapsed);
+            AddCompactAction(OutButton);
+        };
+        CreateCombatDirectionButton(CombatDirectionNorthBtn, TEXT("CombatDirectionNorthButton"), TEXT("NORTH"));
+        CombatDirectionNorthBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnCombatDirectionNorthButtonClicked);
+        CreateCombatDirectionButton(CombatDirectionWestBtn, TEXT("CombatDirectionWestButton"), TEXT("WEST"));
+        CombatDirectionWestBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnCombatDirectionWestButtonClicked);
+        CreateCombatDirectionButton(CombatDirectionEastBtn, TEXT("CombatDirectionEastButton"), TEXT("EAST"));
+        CombatDirectionEastBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnCombatDirectionEastButtonClicked);
+        CreateCombatDirectionButton(CombatDirectionSouthBtn, TEXT("CombatDirectionSouthButton"), TEXT("SOUTH"));
+        CombatDirectionSouthBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnCombatDirectionSouthButtonClicked);
+        CreateCombatDirectionButton(CombatDirectionCancelBtn, TEXT("CombatDirectionCancelButton"), TEXT("CANCEL"));
+        CombatDirectionCancelBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnCombatDirectionCancelButtonClicked);
+
+        CombatFleeBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("CombatFleeButton"));
+        UTextBlock* CombatFleeText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        CombatFleeText->SetText(FText::FromString(TEXT("FLEE")));
+        CombatFleeText->SetColorAndOpacity(FLinearColor::Black);
+        CombatFleeBtn->AddChild(CombatFleeText);
+        CombatFleeBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnCombatFleeButtonClicked);
+        AddCompactAction(CombatFleeBtn);
+
         PlayerAmbushBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("PlayerAmbushButton"));
         UTextBlock* PlayerAmbushText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         PlayerAmbushText->SetText(FText::FromString(TEXT("AMBUSH")));
@@ -398,9 +442,7 @@ bool UMainGameUI::Initialize()
         {
             if (GM->InventoryComponent)
             {
-                GridBoard->InventoryComponent = GM->InventoryComponent;
-                GM->InventoryComponent->OnInventoryChanged.AddDynamic(GridBoard, &UGridBoardWidget::RefreshGridUI);
-                GridBoard->RefreshGridUI();
+                GridBoard->BindInventory(GM->InventoryComponent);
             }
 
             if (GM->LootContainerComponent)
@@ -419,9 +461,7 @@ bool UMainGameUI::Initialize()
 
             if (GM->RigComponent)
             {
-                RigBoard->InventoryComponent = GM->RigComponent;
-                GM->RigComponent->OnInventoryChanged.AddDynamic(RigBoard, &UGridBoardWidget::RefreshGridUI);
-                RigBoard->RefreshGridUI();
+                RigBoard->BindInventory(GM->RigComponent);
             }
 
             if (GM->PocketComponent)
@@ -451,7 +491,7 @@ bool UMainGameUI::Initialize()
             GM->OnGameStateChanged.AddDynamic(this, &UMainGameUI::UpdateCombatUI);
             UpdateActionAvailability();
 
-            SearchBtn->OnClicked.AddDynamic(GM, &AGridGameMode::StartContainerSearch);
+            SearchBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnSearchButtonClicked);
         }
     }
     return true;
@@ -513,8 +553,14 @@ void UMainGameUI::UpdateActionAvailability()
     const bool bHasAmbushTarget = bPlayerAmbushing && GM->EnemyManagerComponent &&
         GM->EnemyManagerComponent->FindPlayerAmbushTarget(AmbushTargetID);
     const bool bAtExtractionPoint = bInRaid && GM->IsAtExtractionPoint();
+    if (!bInCombat)
+    {
+        CombatDirectionMode = ECombatDirectionMode::None;
+    }
 
-    if (SearchBtn) SearchBtn->SetIsEnabled(bInRaid && !bInCombat);
+    const bool bHasDeadBody = bInRaid && GM && GM->HasDeadBodyAtCurrentPlayerCoord();
+    if (SearchBtn) SearchBtn->SetIsEnabled(bInRaid && !bInCombat && !bPlayerAmbushing && !bEnemyAmbush);
+    if (SearchBtnText) SearchBtnText->SetText(FText::FromString(bHasDeadBody ? TEXT("SEARCH DEAD BODY") : TEXT("SEARCH CONTAINER")));
     if (StashBtn)
     {
         StashBtn->SetVisibility(bInRaid ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
@@ -525,6 +571,16 @@ void UMainGameUI::UpdateActionAvailability()
     if (SellAllBtn) SellAllBtn->SetIsEnabled(bInRaid && !bInCombat);
     if (BangBtn) BangBtn->SetIsEnabled(bInCombat);
     if (ReloadBtn) ReloadBtn->SetIsEnabled(bInRaid && !bEnemyAmbush);
+    if (ApproachBtn) ApproachBtn->SetVisibility(ESlateVisibility::Collapsed);
+    if (RetreatBtn) RetreatBtn->SetVisibility(ESlateVisibility::Collapsed);
+    if (CombatMoveBtn) CombatMoveBtn->SetVisibility(ESlateVisibility::Collapsed);
+    if (CombatFleeBtn) CombatFleeBtn->SetIsEnabled(bInCombat);
+    const bool bDirectionMode = false;
+    if (CombatDirectionNorthBtn) CombatDirectionNorthBtn->SetVisibility(bDirectionMode ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    if (CombatDirectionWestBtn) CombatDirectionWestBtn->SetVisibility(bDirectionMode ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    if (CombatDirectionEastBtn) CombatDirectionEastBtn->SetVisibility(bDirectionMode ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    if (CombatDirectionSouthBtn) CombatDirectionSouthBtn->SetVisibility(bDirectionMode ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    if (CombatDirectionCancelBtn) CombatDirectionCancelBtn->SetVisibility(bDirectionMode ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
     if (PlayerAmbushBtn)
     {
         PlayerAmbushBtn->SetVisibility(bInRaid && !bInCombat && !bPlayerAmbushing && !bEnemyAmbush
@@ -622,14 +678,82 @@ void UMainGameUI::OnStartRaidClicked()
         if (GM->StartRaid() && RightPanelSwitcher)
         {
             RightPanelSwitcher->SetActiveWidgetIndex(0);
+
+            // START RAID button disappears with the lobby/stash panel, so keyboard focus can be lost.
+            // Restore focus to the persistent root UI after the panel switch has completed.
+            ScheduleRaidInputFocusRestore();
         }
     }
+}
+
+void UMainGameUI::RestoreRaidInputFocus()
+{
+    bRaidFocusRestorePending = false;
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (!GM || GM->RaidState != ERaidState::InRaid || HasAnyUserFocus()) return;
+
+    APlayerController* PC = GetOwningPlayer();
+    if (!PC) return;
+
+    FInputModeUIOnly InputMode;
+    InputMode.SetWidgetToFocus(TakeWidget());
+    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+    PC->SetInputMode(InputMode);
+    SetKeyboardFocus();
+    SetUserFocus(PC);
+}
+
+void UMainGameUI::ScheduleRaidInputFocusRestore()
+{
+    if (bRaidFocusRestorePending || !GetWorld()) return;
+    bRaidFocusRestorePending = true;
+
+    FTimerDelegate FocusDelegate;
+    FocusDelegate.BindUFunction(this, GET_FUNCTION_NAME_CHECKED(UMainGameUI, RestoreRaidInputFocus));
+    GetWorld()->GetTimerManager().SetTimerForNextTick(FocusDelegate);
 }
 
 void UMainGameUI::OnExtractButtonClicked()
 {
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
     if (GM) GM->ExtractRaid();
+}
+
+void UMainGameUI::OnSearchButtonClicked()
+{
+    if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+    {
+        if (GM->HasDeadBodyAtCurrentPlayerCoord())
+        {
+            GM->RequestSearchDeadBody();
+        }
+        else
+        {
+            GM->StartContainerSearch();
+        }
+    }
+}
+
+void UMainGameUI::SetLootInventory(UGridInventoryComponent* Inventory)
+{
+    if (!ContainerBoard || !Inventory) return;
+    ContainerBoard->InventoryComponent = Inventory;
+    Inventory->OnInventoryChanged.AddUniqueDynamic(ContainerBoard, &UGridBoardWidget::RefreshGridUI);
+    ContainerBoard->RefreshGridUI();
+}
+
+void UMainGameUI::ClearCorpseLootView()
+{
+    if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+    {
+        SetLootInventory(GM->LootContainerComponent);
+    }
+}
+
+void UMainGameUI::RefreshEnemyMarkers()
+{
+    if (MinimapUI) MinimapUI->RefreshEnemyDebugMarkers();
+    if (CompactMinimapUI) CompactMinimapUI->RefreshEnemyDebugMarkers();
 }
 
 void UMainGameUI::OnDebugSpawnEnemyClicked()
@@ -660,6 +784,43 @@ FReply UMainGameUI::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent
 {
     FKey Key = InKeyEvent.GetKey();
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (Key == EKeys::Escape && CombatDirectionMode == ECombatDirectionMode::Flee)
+    {
+        SetCombatDirectionMode(ECombatDirectionMode::None);
+        return FReply::Handled();
+    }
+
+    ECombatMovementDirection Direction = ECombatMovementDirection::North;
+    bool bHasDirection = true;
+    if (Key == EKeys::W) Direction = ECombatMovementDirection::North;
+    else if (Key == EKeys::A) Direction = ECombatMovementDirection::West;
+    else if (Key == EKeys::S) Direction = ECombatMovementDirection::South;
+    else if (Key == EKeys::D) Direction = ECombatMovementDirection::East;
+    else bHasDirection = false;
+    if (bHasDirection && GM && GM->RaidState == ERaidState::InRaid)
+    {
+        if (CombatDirectionMode == ECombatDirectionMode::Flee)
+        {
+            RequestCombatDirection(Direction);
+        }
+        else if (GM->CombatComponent && GM->CombatComponent->bHasActiveEnemy)
+        {
+            if (!GM->CombatComponent->RequestCombatMovementDirection(
+                ECombatMovementAction::Approach, Direction) &&
+                !GM->CombatComponent->LastCombatMessage.IsEmpty())
+            {
+                QueueEventNotification(GM->CombatComponent->LastCombatMessage);
+            }
+        }
+        else
+        {
+            const FIntPoint Delta = Direction == ECombatMovementDirection::North ? FIntPoint(0, -1) :
+                Direction == ECombatMovementDirection::West ? FIntPoint(-1, 0) :
+                Direction == ECombatMovementDirection::East ? FIntPoint(1, 0) : FIntPoint(0, 1);
+            GM->RequestPlayerCardinalMove(Delta);
+        }
+        return FReply::Handled();
+    }
     if (Key == EKeys::One)
     {
         if (GM && GM->CombatComponent)
@@ -702,6 +863,13 @@ FReply UMainGameUI::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent
 void UMainGameUI::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
     Super::NativeTick(MyGeometry, InDeltaTime);
+    if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+    {
+        if (GM->RaidState == ERaidState::InRaid && !HasAnyUserFocus())
+        {
+            ScheduleRaidInputFocusRestore();
+        }
+    }
     if (MinimapUI) MinimapUI->RefreshEnemyDebugMarkers();
     if (CompactMinimapUI) CompactMinimapUI->RefreshEnemyDebugMarkers();
     UpdateEnemyEventLog();
@@ -962,31 +1130,11 @@ void UMainGameUI::QueueEventNotification(FString Message)
     if (Message.IsEmpty() || !EventNotificationText) return;
 
     AddEventLogEntry(Message);
-
-    PendingEventNotifications.Add(Message);
-    if (EventNotificationText->GetVisibility() == ESlateVisibility::Visible)
-    {
-        return;
-    }
-
-    EventNotificationText->SetText(FText::FromString(PendingEventNotifications[0]));
-    EventNotificationText->SetVisibility(ESlateVisibility::Visible);
-    if (EventNotificationBorder)
-    {
-        EventNotificationBorder->SetVisibility(ESlateVisibility::Visible);
-    }
-    PendingEventNotifications.RemoveAt(0);
-
-    if (UWorld* World = GetWorld())
-    {
-        World->GetTimerManager().SetTimer(
-            EventNotificationTimerHandle, this, &UMainGameUI::OnEventNotificationTimerExpired, 2.5f, false);
-    }
 }
 
 void UMainGameUI::AddEventLogEntry(const FString& Message)
 {
-    if (Message.IsEmpty() || !EventLogScrollBox) return;
+    if (Message.IsEmpty()) return;
 
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
     const int32 ElapsedSeconds = GM ? FMath::Max(0, FMath::FloorToInt(GM->TotalTimeLimit - GM->RemainingTime)) : 0;
@@ -995,6 +1143,8 @@ void UMainGameUI::AddEventLogEntry(const FString& Message)
     {
         EventLogEntries.RemoveAt(0);
     }
+
+    if (!EventLogScrollBox) return;
 
     EventLogScrollBox->ClearChildren();
     UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -1232,6 +1382,72 @@ void UMainGameUI::OnReloadButtonClicked()
     {
         QueueEventNotification(GM->CombatComponent->LastCombatMessage);
     }
+}
+
+void UMainGameUI::SetCombatDirectionMode(ECombatDirectionMode InMode)
+{
+    CombatDirectionMode = InMode;
+    UpdateActionAvailability();
+    if (CombatActionText && InMode != ECombatDirectionMode::None)
+    {
+        CombatActionText->SetText(FText::FromString(
+            InMode == ECombatDirectionMode::Move
+                ? TEXT("SELECT MOVE DIRECTION") : TEXT("FLEE: W/A/S/D 방향 선택, ESC 취소")));
+    }
+}
+
+void UMainGameUI::RequestCombatDirection(ECombatMovementDirection Direction)
+{
+    if (CombatDirectionMode == ECombatDirectionMode::None) return;
+
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    const ECombatMovementAction Action = CombatDirectionMode == ECombatDirectionMode::Flee
+        ? ECombatMovementAction::Flee : ECombatMovementAction::Approach;
+    if (!GM || !GM->CombatComponent || !GM->CombatComponent->RequestCombatMovementDirection(Action, Direction))
+    {
+        if (GM && GM->CombatComponent && !GM->CombatComponent->LastCombatMessage.IsEmpty())
+        {
+            QueueEventNotification(GM->CombatComponent->LastCombatMessage);
+        }
+        return;
+    }
+    CombatDirectionMode = ECombatDirectionMode::None;
+    UpdateActionAvailability();
+}
+
+void UMainGameUI::OnCombatMoveButtonClicked()
+{
+    SetCombatDirectionMode(ECombatDirectionMode::Move);
+}
+
+void UMainGameUI::OnCombatDirectionNorthButtonClicked() { RequestCombatDirection(ECombatMovementDirection::North); }
+void UMainGameUI::OnCombatDirectionWestButtonClicked() { RequestCombatDirection(ECombatMovementDirection::West); }
+void UMainGameUI::OnCombatDirectionEastButtonClicked() { RequestCombatDirection(ECombatMovementDirection::East); }
+void UMainGameUI::OnCombatDirectionSouthButtonClicked() { RequestCombatDirection(ECombatMovementDirection::South); }
+void UMainGameUI::OnCombatDirectionCancelButtonClicked()
+{
+    SetCombatDirectionMode(ECombatDirectionMode::None);
+}
+
+void UMainGameUI::OnApproachButtonClicked()
+{
+    if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+    {
+        if (GM->CombatComponent) GM->CombatComponent->RequestCombatMovement(ECombatMovementAction::Approach);
+    }
+}
+
+void UMainGameUI::OnRetreatButtonClicked()
+{
+    if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+    {
+        if (GM->CombatComponent) GM->CombatComponent->RequestCombatMovement(ECombatMovementAction::Retreat);
+    }
+}
+
+void UMainGameUI::OnCombatFleeButtonClicked()
+{
+    SetCombatDirectionMode(ECombatDirectionMode::Flee);
 }
 
 void UMainGameUI::OnPlayerAmbushButtonClicked()

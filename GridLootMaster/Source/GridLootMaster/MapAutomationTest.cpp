@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
 #include "Map/MapManagerComponent.h"
+#include "GridGameMode.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
     FGridLootMasterMapV1Test,
@@ -96,6 +97,40 @@ bool FGridLootMasterMapV1Test::RunTest(const FString& Parameters)
     TestFalse(TEXT("Static forbidden tile is not a normal Enemy Spawn candidate"), TileData.bEnemySpawnAllowed);
     TestTrue(TEXT("Static allowed tile is a normal Enemy Spawn candidate"),
         MapManager->GetTileData(4, 0, TileData) && TileData.bEnemySpawnAllowed);
+    return true;
+}
+
+#endif
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterRaidCardinalMoveWithoutDestinationTest,
+    "GridLootMaster.Raid.CardinalMoveDoesNotRequireMinimapDestination",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterRaidCardinalMoveWithoutDestinationTest::RunTest(const FString& Parameters)
+{
+    AGridGameMode* GameMode = NewObject<AGridGameMode>();
+    if (!GameMode || !GameMode->MapManagerComponent) return false;
+    GameMode->MapManagerComponent->InitializeMap();
+    GameMode->RaidState = ERaidState::InRaid;
+    GameMode->EnemyManagerComponent = nullptr;
+
+    for (const FIntPoint Start : { FIntPoint(0, 0), FIntPoint(8, 8) })
+    {
+        GameMode->CurrentPlayerCoord = Start;
+        bool bMoved = false;
+        for (const FIntPoint Delta : { FIntPoint(1, 0), FIntPoint(-1, 0), FIntPoint(0, 1), FIntPoint(0, -1) })
+        {
+            if (GameMode->MapManagerComponent->CanMoveBetween(Start, Start + Delta))
+            {
+                bMoved = GameMode->RequestPlayerCardinalMove(Delta);
+                break;
+            }
+        }
+        TestTrue(TEXT("A valid cardinal neighbor moves without a Minimap destination"), bMoved);
+    }
     return true;
 }
 

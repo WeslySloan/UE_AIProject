@@ -7,6 +7,33 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnInventoryChanged);
 
+USTRUCT(BlueprintType)
+struct GRIDLOOTMASTER_API FStorageSectionDefinition
+{
+    GENERATED_BODY()
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FIntPoint Size = FIntPoint(1, 1);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 Count = 1;
+};
+
+USTRUCT()
+struct GRIDLOOTMASTER_API FGridInventorySection
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    int32 Width = 1;
+
+    UPROPERTY()
+    int32 Height = 1;
+
+    UPROPERTY()
+    TArray<FName> GridCells;
+};
+
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
 class GRIDLOOTMASTER_API UGridInventoryComponent : public UActorComponent
 {
@@ -28,6 +55,12 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
     TArray<FName> GridCells;
 
+    UPROPERTY(VisibleAnywhere, Category = "Inventory")
+    TArray<FGridInventorySection> AdditionalSections;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Inventory")
+    bool bStorageEnabled = true;
+
     // 인벤토리가 변경되었을 때 호출되는 델리게이트
     UPROPERTY(BlueprintAssignable, Category = "Inventory|Events")
     FOnInventoryChanged OnInventoryChanged;
@@ -39,6 +72,45 @@ public:
     // 그리드 크기를 초기화합니다.
     UFUNCTION(BlueprintCallable, Category = "Inventory")
     void InitializeGrid(int32 Width, int32 Height);
+
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    bool InitializeSections(const TArray<FIntPoint>& SectionSizes);
+
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    bool ReconfigureSections(const TArray<FIntPoint>& SectionSizes);
+
+    UFUNCTION(BlueprintCallable, Category = "Inventory")
+    bool DisableStorage();
+
+    UFUNCTION(BlueprintPure, Category = "Inventory")
+    bool IsStorageEnabled() const { return bStorageEnabled; }
+
+    UFUNCTION(BlueprintPure, Category = "Inventory")
+    int32 GetSectionCount() const;
+
+    UFUNCTION(BlueprintPure, Category = "Inventory")
+    FIntPoint GetSectionSize(int32 SectionIndex) const;
+
+    UFUNCTION(BlueprintPure, Category = "Inventory")
+    bool IsValidSection(int32 SectionIndex) const;
+
+    UFUNCTION(BlueprintPure, Category = "Inventory")
+    bool IsValidSectionIndex(int32 SectionIndex, int32 CellIndex) const;
+
+    UFUNCTION(BlueprintPure, Category = "Inventory")
+    FName GetCellItemID(int32 SectionIndex, int32 X, int32 Y) const;
+
+    bool CheckItemFitInSection(FName ItemID, int32 SectionIndex, int32 StartX, int32 StartY, int32 ItemWidth, int32 ItemHeight) const;
+    bool FindEmptySpaceInSection(int32 SectionIndex, int32 ItemWidth, int32 ItemHeight, int32& OutX, int32& OutY) const;
+    bool FindEmptySpaceAcrossSections(int32 ItemWidth, int32 ItemHeight, int32& OutSectionIndex, int32& OutX, int32& OutY) const;
+    bool FindEmptySpaceAcrossSectionsExcluding(int32 ItemWidth, int32 ItemHeight, FName ExcludedItemID, int32& OutSectionIndex, int32& OutX, int32& OutY) const;
+    bool FindEmptySpaceAcrossSectionsExcludingPlacement(int32 ItemWidth, int32 ItemHeight, FName ExcludedItemID,
+        int32 ReservedSectionIndex, int32 ReservedX, int32 ReservedY, int32 ReservedWidth, int32 ReservedHeight,
+        int32& OutSectionIndex, int32& OutX, int32& OutY) const;
+    bool AddItemToSection(class UItemInstance* ItemObj, int32 SectionIndex, int32 StartX, int32 StartY);
+    bool FindItemPlacement(FName ItemID, int32& OutSectionIndex, int32& OutX, int32& OutY) const;
+
+    static bool ParseStorageLayoutSpec(const FString& LayoutSpec, TArray<FIntPoint>& OutSectionSizes);
 
     // 특정 1D 인덱스가 유효한지 확인
     bool IsValidIndex(int32 Index) const;

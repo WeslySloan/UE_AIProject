@@ -67,6 +67,10 @@ bool UCombatComponent::AttackEnemy(int32 DamageAmount)
         if (AGridGameMode* GM = Cast<AGridGameMode>(GetOwner()))
         {
             GM->AddScore(CurrentEnemy.Definition.Reward);
+            if (GM->EnemyManagerComponent)
+            {
+                GM->EnemyManagerComponent->SyncCombatContact();
+            }
         }
     }
 
@@ -230,7 +234,7 @@ bool UCombatComponent::RequestReload(FName WeaponSlot)
 {
     AGridGameMode* GM = Cast<AGridGameMode>(GetOwner());
     if (!GM || GM->RaidState != ERaidState::InRaid || !GM->EquipmentComponent ||
-        !GM->InventoryComponent || PlayerActionState != ECombatPlayerActionState::None)
+        !GM->RigComponent || !GM->PocketComponent || PlayerActionState != ECombatPlayerActionState::None)
     {
         return false;
     }
@@ -246,42 +250,75 @@ bool UCombatComponent::RequestReload(FName WeaponSlot)
     const FName RequestedSlot = WeaponSlot == NAME_None ? ActiveWeaponSlot : WeaponSlot;
     UItemInstance* Weapon = GM->EquipmentComponent->GetEquippedItem(RequestedSlot);
     if (!Weapon || Weapon->Category != EItemCategory::Weapon ||
-        Weapon->WeaponAttackType != EWeaponAttackType::Firearm || !Weapon->EquippedMagazine)
+        Weapon->WeaponAttackType != EWeaponAttackType::Firearm)
     {
         LastCombatMessage = TEXT("재장전할 총기 또는 탄창이 없습니다.");
         OnCombatStateChanged.Broadcast();
         return false;
     }
 
-    UItemInstance* Magazine = Weapon->EquippedMagazine;
-    const int32 MagazineCapacity = FMath::Max(0, Magazine->MaxAmmo);
-    if (MagazineCapacity <= Magazine->CurrentAmmo)
+    struct FReloadCandidate
     {
-        LastCombatMessage = TEXT("탄창이 이미 가득 찼습니다.");
-        OnCombatStateChanged.Broadcast();
-        return false;
-    }
+        UGridInventoryComponent* Source = nullptr;
+        UItemInstance* Magazine = nullptr;
+        FIntPoint GridCoord = FIntPoint::ZeroValue;
+        int32 SectionIndex = 0;
+        int32 SourcePriority = 0;
+    };
 
-    UItemInstance* CompatibleAmmo = nullptr;
-    for (const TPair<FName, UItemInstance*>& Pair : GM->InventoryComponent->ItemInstances)
+    FReloadCandidate BestCandidate;
+    bool bHasCandidate = false;
+    const TArray<UGridInventoryComponent*> Sources = { GM->RigComponent, GM->PocketComponent };
+    for (int32 SourceIndex = 0; SourceIndex < Sources.Num(); ++SourceIndex)
     {
-        if (Pair.Value && Pair.Value->CurrentStack > 0 && Magazine->IsCompatibleAmmo(Pair.Value))
+        UGridInventoryComponent* Source = Sources[SourceIndex];
+        if (!Source) continue;
+
+        for (const TPair<FName, UItemInstance*>& Pair : Source->ItemInstances)
         {
-            CompatibleAmmo = Pair.Value;
-            break;
+            UItemInstance* CandidateMagazine = Pair.Value;
+            if (!CandidateMagazine || !Weapon->IsCompatibleMagazine(CandidateMagazine)) continue;
+
+            int32 CandidateSection = INDEX_NONE;
+            FIntPoint CandidateCoord = FIntPoint::ZeroValue;
+            if (!Source->FindItemPlacement(CandidateMagazine->InstanceID, CandidateSection, CandidateCoord.X, CandidateCoord.Y)) continue;
+            const bool bBetter = !bHasCandidate ||
+                CandidateMagazine->CurrentAmmo > BestCandidate.Magazine->CurrentAmmo ||
+                (CandidateMagazine->CurrentAmmo == BestCandidate.Magazine->CurrentAmmo &&
+                    (SourceIndex < BestCandidate.SourcePriority ||
+                        (SourceIndex == BestCandidate.SourcePriority &&
+                            (CandidateSection < BestCandidate.SectionIndex ||
+                                (CandidateSection == BestCandidate.SectionIndex && CandidateCoord.Y < BestCandidate.GridCoord.Y) ||
+                                (CandidateSection == BestCandidate.SectionIndex &&
+                                CandidateCoord.Y == BestCandidate.GridCoord.Y &&
+                                    (CandidateCoord.X < BestCandidate.GridCoord.X ||
+                                        (CandidateCoord == BestCandidate.GridCoord &&
+                                            CandidateMagazine->InstanceID.ToString() < BestCandidate.Magazine->InstanceID.ToString())))))));
+            if (bBetter)
+            {
+                BestCandidate = { Source, CandidateMagazine, CandidateCoord, CandidateSection, SourceIndex };
+                bHasCandidate = true;
+            }
         }
     }
 
-    if (!CompatibleAmmo)
+    UItemInstance* CurrentMagazine = Weapon->EquippedMagazine;
+    if (!bHasCandidate || (CurrentMagazine && CurrentMagazine->CurrentAmmo >= CurrentMagazine->MaxAmmo &&
+        CurrentMagazine->CurrentAmmo >= BestCandidate.Magazine->CurrentAmmo))
     {
-        LastCombatMessage = TEXT("호환되는 탄약이 없습니다.");
+        LastCombatMessage = CurrentMagazine && CurrentMagazine->CurrentAmmo >= CurrentMagazine->MaxAmmo
+            ? TEXT("더 나은 호환 예비 탄창이 없습니다.")
+            : TEXT("호환되는 예비 탄창이 없습니다.");
         OnCombatStateChanged.Broadcast();
         return false;
     }
 
     PendingReloadWeapon = Weapon;
     PendingWeaponSlot = RequestedSlot;
-    PendingReloadAmmoID = CompatibleAmmo->InstanceID;
+    PendingReloadMagazineID = BestCandidate.Magazine->InstanceID;
+    PendingReloadSource = BestCandidate.Source;
+    PendingReloadSectionIndex = BestCandidate.SectionIndex;
+    PendingReloadGridCoord = BestCandidate.GridCoord;
     PlayerActionState = ECombatPlayerActionState::Reloading;
     PlayerActionTimeRemaining = FMath::Max(0.0f, Weapon->ReloadTimeSeconds);
     LastCombatMessage = PlayerActionTimeRemaining > KINDA_SMALL_NUMBER
@@ -296,11 +333,135 @@ bool UCombatComponent::RequestReload(FName WeaponSlot)
     return true;
 }
 
+bool UCombatComponent::RequestCombatMovement(ECombatMovementAction MovementAction)
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(GetOwner());
+    if (!GM || GM->RaidState != ERaidState::InRaid || !bHasActiveEnemy ||
+        PlayerActionState != ECombatPlayerActionState::None || !GM->MapManagerComponent ||
+        !GM->EnemyManagerComponent)
+    {
+        return false;
+    }
+
+    FIntPoint EnemyCoordinate;
+    if (!GM->EnemyManagerComponent->GetActiveEnemyCoordinate(EnemyCoordinate)) return false;
+
+    UItemInstance* Weapon = GM->EquipmentComponent
+        ? GM->EquipmentComponent->GetEquippedItem(ActiveWeaponSlot) : nullptr;
+    const TArray<FIntPoint> Candidates = {
+        GM->CurrentPlayerCoord + FIntPoint(1, 0), GM->CurrentPlayerCoord + FIntPoint(-1, 0),
+        GM->CurrentPlayerCoord + FIntPoint(0, 1), GM->CurrentPlayerCoord + FIntPoint(0, -1) };
+    FIntPoint BestCoord = FIntPoint::ZeroValue;
+    bool bHasBest = false;
+    const int32 CurrentDistance = GM->MapManagerComponent->GetTileDistance(GM->CurrentPlayerCoord, EnemyCoordinate);
+    const bool bCurrentCanAttack = Weapon &&
+        GM->MapManagerComponent->GetTileDistance(GM->CurrentPlayerCoord, EnemyCoordinate) <= Weapon->MaxRangeTiles &&
+        GM->MapManagerComponent->HasLineOfSight(GM->CurrentPlayerCoord, EnemyCoordinate);
+
+    for (const FIntPoint& Candidate : Candidates)
+    {
+        if (Candidate == EnemyCoordinate || !GM->MapManagerComponent->CanMoveBetween(GM->CurrentPlayerCoord, Candidate)) continue;
+        const int32 CandidateDistance = GM->MapManagerComponent->GetTileDistance(Candidate, EnemyCoordinate);
+        const bool bCanAttack = Weapon && CandidateDistance <= Weapon->MaxRangeTiles &&
+            GM->MapManagerComponent->HasLineOfSight(Candidate, EnemyCoordinate);
+        bool bBetter = false;
+        if (MovementAction == ECombatMovementAction::Approach)
+        {
+            bBetter = (!bCurrentCanAttack && bCanAttack) ||
+                ((!bCurrentCanAttack || !bCanAttack) && CandidateDistance < CurrentDistance);
+        }
+        else if (MovementAction == ECombatMovementAction::Retreat)
+        {
+            const bool bCandidateBreaksLOS = !GM->MapManagerComponent->HasLineOfSight(Candidate, EnemyCoordinate);
+            const bool bBestBreaksLOS = bHasBest && !GM->MapManagerComponent->HasLineOfSight(BestCoord, EnemyCoordinate);
+            bBetter = !bHasBest || CandidateDistance > GM->MapManagerComponent->GetTileDistance(BestCoord, EnemyCoordinate) ||
+                (CandidateDistance == GM->MapManagerComponent->GetTileDistance(BestCoord, EnemyCoordinate) && bCandidateBreaksLOS && !bBestBreaksLOS);
+        }
+        else
+        {
+            const bool bCandidateBreaksLOS = !GM->MapManagerComponent->HasLineOfSight(Candidate, EnemyCoordinate);
+            const bool bBestBreaksLOS = bHasBest && !GM->MapManagerComponent->HasLineOfSight(BestCoord, EnemyCoordinate);
+            bBetter = !bHasBest || (bCandidateBreaksLOS && !bBestBreaksLOS) ||
+                (bCandidateBreaksLOS == bBestBreaksLOS && CandidateDistance > GM->MapManagerComponent->GetTileDistance(BestCoord, EnemyCoordinate));
+        }
+        if (bBetter)
+        {
+            BestCoord = Candidate;
+            bHasBest = true;
+        }
+    }
+
+    if (!bHasBest)
+    {
+        LastCombatMessage = TEXT("이동할 수 있는 전투 타일이 없습니다.");
+        OnCombatStateChanged.Broadcast();
+        return false;
+    }
+
+    PendingCombatMovement = MovementAction;
+    PendingCombatMoveCoord = BestCoord;
+    PlayerActionState = ECombatPlayerActionState::Moving;
+    PlayerActionTimeRemaining = FMath::Max(0.0f, CombatMoveActionDuration);
+    LastCombatMessage = TEXT("전투 이동 중...");
+    OnCombatStateChanged.Broadcast();
+    if (PlayerActionTimeRemaining <= KINDA_SMALL_NUMBER) CompletePlayerAction();
+    return true;
+}
+
+bool UCombatComponent::RequestCombatMovementDirection(ECombatMovementAction MovementAction,
+    ECombatMovementDirection Direction)
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(GetOwner());
+    if (!GM || GM->RaidState != ERaidState::InRaid || !bHasActiveEnemy ||
+        PlayerActionState != ECombatPlayerActionState::None || !GM->MapManagerComponent)
+    {
+        return false;
+    }
+
+    FIntPoint Delta = FIntPoint::ZeroValue;
+    switch (Direction)
+    {
+        case ECombatMovementDirection::North: Delta = FIntPoint(0, -1); break;
+        case ECombatMovementDirection::West: Delta = FIntPoint(-1, 0); break;
+        case ECombatMovementDirection::East: Delta = FIntPoint(1, 0); break;
+        case ECombatMovementDirection::South: Delta = FIntPoint(0, 1); break;
+        default: return false;
+    }
+
+    const FIntPoint CandidateCoord = GM->CurrentPlayerCoord + Delta;
+    if (!GM->MapManagerComponent->CanMoveBetween(GM->CurrentPlayerCoord, CandidateCoord))
+    {
+        LastCombatMessage = TEXT("선택한 방향으로 이동할 수 없습니다.");
+        OnCombatStateChanged.Broadcast();
+        return false;
+    }
+
+    PendingCombatMovement = MovementAction;
+    PendingCombatMoveCoord = CandidateCoord;
+    PlayerActionState = ECombatPlayerActionState::Moving;
+    PlayerActionTimeRemaining = FMath::Max(0.0f, CombatMoveActionDuration);
+    LastCombatMessage = MovementAction == ECombatMovementAction::Flee
+        ? TEXT("FLEE 이동 중...") : TEXT("MOVE 이동 중...");
+    OnCombatStateChanged.Broadcast();
+    if (PlayerActionTimeRemaining <= KINDA_SMALL_NUMBER) CompletePlayerAction();
+    return true;
+}
+
 void UCombatComponent::EnemyAttackPlayer(float DamageMultiplier)
 {
     if (AGridGameMode* GM = Cast<AGridGameMode>(GetOwner()))
     {
         if (GM->RaidState != ERaidState::InRaid) return;
+        FIntPoint EnemyCoordinate;
+        if (GM->EnemyManagerComponent && GM->MapManagerComponent &&
+            GM->EnemyManagerComponent->GetActiveEnemyCoordinate(EnemyCoordinate) &&
+            (GM->MapManagerComponent->GetTileDistance(EnemyCoordinate, GM->CurrentPlayerCoord) > CurrentEnemy.Definition.AttackRangeTiles ||
+                !GM->MapManagerComponent->HasLineOfSight(EnemyCoordinate, GM->CurrentPlayerCoord)))
+        {
+            LastCombatMessage = TEXT("적이 공격 사거리 또는 시야 밖에 있습니다.");
+            OnCombatStateChanged.Broadcast();
+            return;
+        }
     }
 
     if (!bHasActiveEnemy) return;
@@ -338,7 +499,10 @@ void UCombatComponent::ClearEnemy()
     PlayerActionState = ECombatPlayerActionState::None;
     PlayerActionTimeRemaining = 0.0f;
     PendingWeaponSlot = NAME_None;
-    PendingReloadAmmoID = NAME_None;
+    PendingReloadMagazineID = NAME_None;
+    PendingReloadSource = nullptr;
+    PendingReloadSectionIndex = 0;
+    PendingReloadGridCoord = FIntPoint::ZeroValue;
     PendingReloadWeapon = nullptr;
     LastCombatMessage = TEXT("전투가 종료되었습니다.");
     OnCombatStateChanged.Broadcast();
@@ -419,45 +583,80 @@ void UCombatComponent::CompletePlayerAction()
         UItemInstance* Weapon = GM->EquipmentComponent
             ? GM->EquipmentComponent->GetEquippedItem(PendingWeaponSlot)
             : nullptr;
-        UItemInstance* Ammo = GM->InventoryComponent
-            ? GM->InventoryComponent->GetItemInstance(PendingReloadAmmoID)
-            : nullptr;
-        UItemInstance* Magazine = Weapon ? Weapon->EquippedMagazine : nullptr;
-        if (!Weapon || Weapon != PendingReloadWeapon || !Magazine || !Ammo || Ammo->CurrentStack <= 0)
+        UGridInventoryComponent* Source = PendingReloadSource;
+        UItemInstance* SelectedMagazine = Source ? Source->GetItemInstance(PendingReloadMagazineID) : nullptr;
+        UItemInstance* CurrentMagazine = Weapon ? Weapon->EquippedMagazine : nullptr;
+        if (!Weapon || Weapon != PendingReloadWeapon || !Source || !SelectedMagazine ||
+            SelectedMagazine->InstanceID != PendingReloadMagazineID ||
+            !Source->IsValidSection(PendingReloadSectionIndex) ||
+            Source->GetCellItemID(PendingReloadSectionIndex, PendingReloadGridCoord.X, PendingReloadGridCoord.Y) != PendingReloadMagazineID ||
+            !Weapon->IsCompatibleMagazine(SelectedMagazine))
         {
-            CancelPlayerAction(TEXT("재장전 대상 또는 탄약이 사라졌습니다."));
+            CancelPlayerAction(TEXT("재장전 대상 또는 예비 탄창이 사라졌습니다."));
             return;
         }
 
-        const int32 AvailableCapacity = FMath::Max(0, Magazine->MaxAmmo - Magazine->CurrentAmmo);
-        const int32 AmountToLoad = FMath::Min(AvailableCapacity, Ammo->CurrentStack);
-        if (AmountToLoad <= 0)
+        if (CurrentMagazine && !Source->CheckItemFitInSection(SelectedMagazine->InstanceID, PendingReloadSectionIndex,
+            PendingReloadGridCoord.X, PendingReloadGridCoord.Y,
+            CurrentMagazine->GetCurrentSize().X, CurrentMagazine->GetCurrentSize().Y))
         {
-            CancelPlayerAction(TEXT("재장전할 탄약이 없습니다."));
+            CancelPlayerAction(TEXT("예비 탄창을 교환할 공간이 없습니다."));
             return;
         }
 
-        Magazine->CurrentAmmo += AmountToLoad;
-        Ammo->CurrentStack -= AmountToLoad;
-        Magazine->OnItemModified.Broadcast();
+        if (!Source->RemoveItem(SelectedMagazine->InstanceID))
+        {
+            CancelPlayerAction(TEXT("예비 탄창을 교환할 수 없습니다."));
+            return;
+        }
+        if (CurrentMagazine && !Source->AddItemToSection(CurrentMagazine, PendingReloadSectionIndex, PendingReloadGridCoord.X, PendingReloadGridCoord.Y))
+        {
+            if (!Source->AddItemToSection(SelectedMagazine, PendingReloadSectionIndex, PendingReloadGridCoord.X, PendingReloadGridCoord.Y))
+            {
+                UE_LOG(LogTemp, Error, TEXT("Reload rollback failed for magazine %s at section %d (%d,%d)."),
+                    *SelectedMagazine->InstanceID.ToString(), PendingReloadSectionIndex,
+                    PendingReloadGridCoord.X, PendingReloadGridCoord.Y);
+            }
+            CancelPlayerAction(TEXT("예비 탄창 교환을 취소했습니다."));
+            return;
+        }
+
+        Weapon->EquippedMagazine = SelectedMagazine;
+        SelectedMagazine->OnItemModified.Broadcast();
+        if (CurrentMagazine) CurrentMagazine->OnItemModified.Broadcast();
         Weapon->OnItemModified.Broadcast();
-        if (Ammo->CurrentStack <= 0)
+        GM->EquipmentComponent->OnEquipmentChanged.Broadcast();
+        LastCombatMessage = TEXT("재장전 완료: 탄창 교체");
+    }
+    else if (PlayerActionState == ECombatPlayerActionState::Moving)
+    {
+        const ECombatMovementAction CompletedMovement = PendingCombatMovement;
+        if (!CommitCombatMovement())
         {
-            GM->InventoryComponent->RemoveItem(Ammo->InstanceID);
+            CancelPlayerAction(TEXT("전투 이동을 완료할 수 없습니다."));
+            return;
+        }
+        if (CompletedMovement == ECombatMovementAction::Flee)
+        {
+            LastCombatMessage = bHasActiveEnemy
+                ? TEXT("FLEE FAILED - Enemy still has line of sight.")
+                : TEXT("FLEE SUCCESS - Combat disengaged.");
         }
         else
         {
-            Ammo->OnItemModified.Broadcast();
-            GM->InventoryComponent->OnInventoryChanged.Broadcast();
+            LastCombatMessage = TEXT("전투 이동 완료");
         }
-        LastCombatMessage = FString::Printf(TEXT("재장전 완료: %d발 장전"), AmountToLoad);
     }
 
     PlayerActionState = ECombatPlayerActionState::None;
     PlayerActionTimeRemaining = 0.0f;
     PendingWeaponSlot = NAME_None;
-    PendingReloadAmmoID = NAME_None;
+    PendingReloadMagazineID = NAME_None;
+    PendingReloadSource = nullptr;
+    PendingReloadSectionIndex = 0;
+    PendingReloadGridCoord = FIntPoint::ZeroValue;
     PendingReloadWeapon = nullptr;
+    PendingCombatMoveCoord = FIntPoint::ZeroValue;
     OnCombatStateChanged.Broadcast();
 }
 
@@ -466,8 +665,11 @@ void UCombatComponent::CancelPlayerAction(const FString& Message)
     PlayerActionState = ECombatPlayerActionState::None;
     PlayerActionTimeRemaining = 0.0f;
     PendingWeaponSlot = NAME_None;
-    PendingReloadAmmoID = NAME_None;
+    PendingReloadMagazineID = NAME_None;
+    PendingReloadSource = nullptr;
+    PendingReloadGridCoord = FIntPoint::ZeroValue;
     PendingReloadWeapon = nullptr;
+    PendingCombatMoveCoord = FIntPoint::ZeroValue;
     LastCombatMessage = Message;
     OnCombatStateChanged.Broadcast();
 }
@@ -478,6 +680,24 @@ void UCombatComponent::AdvanceCombatTimeForTest(float DeltaTime)
     AdvanceCombatTime(DeltaTime);
 }
 #endif
+
+bool UCombatComponent::CommitCombatMovement()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(GetOwner());
+    if (!GM || !GM->MovePlayerDuringCombat(PendingCombatMoveCoord)) return false;
+
+    if (PendingCombatMovement == ECombatMovementAction::Flee && GM->EnemyManagerComponent)
+    {
+        FIntPoint EnemyCoordinate;
+        if (GM->EnemyManagerComponent->GetActiveEnemyCoordinate(EnemyCoordinate) && GM->MapManagerComponent &&
+            !GM->MapManagerComponent->HasLineOfSight(GM->CurrentPlayerCoord, EnemyCoordinate))
+        {
+            ClearEnemy();
+            GM->EnemyManagerComponent->EndCombatContact();
+        }
+    }
+    return true;
+}
 
 bool UCombatComponent::IsCombatRangeValid(int32 RangeTiles) const
 {

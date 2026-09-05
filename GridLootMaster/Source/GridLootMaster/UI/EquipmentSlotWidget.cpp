@@ -309,6 +309,18 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
 
     int32 FreeX = 0;
     int32 FreeY = 0;
+    int32 FreeSection = 0;
+    int32 IncomingOriginalSection = INDEX_NONE;
+    int32 IncomingOriginalX = INDEX_NONE;
+    int32 IncomingOriginalY = INDEX_NONE;
+    const bool bIncomingHasOriginalPlacement = ItemDropOp->SourceInventory &&
+        ItemDropOp->SourceInventory->FindItemPlacement(ItemDropOp->ItemObj->InstanceID,
+            IncomingOriginalSection, IncomingOriginalX, IncomingOriginalY);
+    if (bIncomingHasOriginalPlacement && ItemDropOp->SourceSectionIndex != IncomingOriginalSection)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Drag source section %d disagrees with actual section %d for item %s; using actual placement."),
+            ItemDropOp->SourceSectionIndex, IncomingOriginalSection, *ItemDropOp->ItemObj->InstanceID.ToString());
+    }
 
     auto RestoreIncomingItem = [&]() -> bool
     {
@@ -323,9 +335,25 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
         UGridInventoryComponent* RestoreInventory = ItemDropOp->SourceInventory
             ? ItemDropOp->SourceInventory
             : GM->InventoryComponent;
+        if (bIncomingHasOriginalPlacement && RestoreInventory == ItemDropOp->SourceInventory)
+        {
+            if (RestoreInventory->AddItemToSection(ItemDropOp->ItemObj, IncomingOriginalSection, IncomingOriginalX, IncomingOriginalY))
+            {
+                return true;
+            }
+            UE_LOG(LogTemp, Error, TEXT("Failed to restore incoming item to its original section/coordinate: %s"),
+                *ItemDropOp->ItemObj->InstanceID.ToString());
+            return false;
+        }
+        if (ItemDropOp->SourceInventory && RestoreInventory == ItemDropOp->SourceInventory)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Cannot safely restore incoming item because its original placement is unavailable: %s"),
+                *ItemDropOp->ItemObj->InstanceID.ToString());
+            return false;
+        }
         return RestoreInventory &&
-            RestoreInventory->FindEmptySpace(IncomingSize.X, IncomingSize.Y, RestoreX, RestoreY) &&
-            RestoreInventory->AddItem(ItemDropOp->ItemObj, RestoreX, RestoreY);
+            RestoreInventory->FindEmptySpaceAcrossSections(IncomingSize.X, IncomingSize.Y, FreeSection, RestoreX, RestoreY) &&
+            RestoreInventory->AddItemToSection(ItemDropOp->ItemObj, FreeSection, RestoreX, RestoreY);
     };
 
     bool bIncomingRemoved = false;
@@ -337,12 +365,18 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
         bool bCanStorePreviousItem = false;
         if (ItemDropOp->SourceInventory == GM->InventoryComponent)
         {
-            bCanStorePreviousItem = GM->InventoryComponent->FindEmptySpaceExcluding(
-                Size.X, Size.Y, ItemDropOp->ItemObj->InstanceID, FreeX, FreeY);
+            bCanStorePreviousItem = bIncomingHasOriginalPlacement
+                ? GM->InventoryComponent->FindEmptySpaceAcrossSectionsExcludingPlacement(
+                    Size.X, Size.Y, ItemDropOp->ItemObj->InstanceID,
+                    IncomingOriginalSection, IncomingOriginalX, IncomingOriginalY,
+                    ItemDropOp->ItemObj->GetCurrentSize().X, ItemDropOp->ItemObj->GetCurrentSize().Y,
+                    FreeSection, FreeX, FreeY)
+                : GM->InventoryComponent->FindEmptySpaceAcrossSectionsExcluding(
+                    Size.X, Size.Y, ItemDropOp->ItemObj->InstanceID, FreeSection, FreeX, FreeY);
         }
         else
         {
-            bCanStorePreviousItem = GM->InventoryComponent->FindEmptySpace(Size.X, Size.Y, FreeX, FreeY);
+            bCanStorePreviousItem = GM->InventoryComponent->FindEmptySpaceAcrossSections(Size.X, Size.Y, FreeSection, FreeX, FreeY);
         }
 
         if (!bCanStorePreviousItem)
@@ -373,7 +407,7 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
             return false;
         }
 
-        if (!GM->InventoryComponent->AddItem(PreviousItem, FreeX, FreeY))
+        if (!GM->InventoryComponent->AddItemToSection(PreviousItem, FreeSection, FreeX, FreeY))
         {
             // 예기치 않은 실패가 발생하면 기존 장비를 즉시 장착 상태로 복구합니다.
             const bool bPreviousRestored = GM->EquipmentComponent->EquipItem(SlotID, PreviousItem);
@@ -433,6 +467,29 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
             UE_LOG(LogTemp, Error, TEXT("Failed to restore equipment swap state after incoming equip failure."));
         }
         return false;
+    }
+
+    if (SlotID == TEXT("Backpack") || SlotID == TEXT("Rig"))
+    {
+        if (!GM->ReconfigureStorageForEquipmentSlot(SlotID, ItemDropOp->ItemObj))
+        {
+            GM->EquipmentComponent->RemoveItemBySlotID(SlotID);
+            if (!RestoreIncomingItem())
+            {
+                UE_LOG(LogTemp, Error, TEXT("Storage equipment swap rollback failed for incoming item: %s"),
+                    *ItemDropOp->ItemObj->InstanceID.ToString());
+            }
+            if (PreviousItem)
+            {
+                if (!GM->InventoryComponent->RemoveItem(PreviousItem->InstanceID) ||
+                    !GM->EquipmentComponent->EquipItem(SlotID, PreviousItem))
+                {
+                    UE_LOG(LogTemp, Error, TEXT("Storage equipment swap rollback failed for previous item: %s"),
+                        *PreviousItem->InstanceID.ToString());
+                }
+            }
+            return false;
+        }
     }
 
     if (ItemDropOp->OriginalWidget)
@@ -522,24 +579,33 @@ void UEquipmentSlotWidget::HandleUnequipClicked(UItemInstance* ItemObj)
 {
     if (ItemObj == EquippedItem)
     {
+        if (SlotID == TEXT("Backpack") || SlotID == TEXT("Rig"))
+        {
+            if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+            {
+                if (GM->TryStandaloneStorageUnequip(SlotID, ItemObj)) RefreshSlotUI();
+            }
+            return;
+        }
         AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
         if (GM && GM->InventoryComponent && GM->EquipmentComponent)
         {
             FIntPoint Size = ItemObj->GetCurrentSize();
             int32 FreeX, FreeY;
+            int32 FreeSection = INDEX_NONE;
             if (GM->EquipmentComponent->GetEquippedItem(SlotID) != ItemObj)
             {
                 return;
             }
 
-            if (GM->InventoryComponent->FindEmptySpace(Size.X, Size.Y, FreeX, FreeY))
+            if (GM->InventoryComponent->FindEmptySpaceAcrossSections(Size.X, Size.Y, FreeSection, FreeX, FreeY))
             {
                 if (!GM->EquipmentComponent->RemoveItemByInstanceID(ItemObj->InstanceID))
                 {
                     return;
                 }
 
-                if (!GM->InventoryComponent->AddItem(ItemObj, FreeX, FreeY))
+                if (!GM->InventoryComponent->AddItemToSection(ItemObj, FreeSection, FreeX, FreeY))
                 {
                     // 예기치 않은 수납 실패 시 장비를 원래 슬롯으로 복구합니다.
                     GM->EquipmentComponent->EquipItem(SlotID, ItemObj);
@@ -565,9 +631,10 @@ void UEquipmentSlotWidget::HandleUnloadClicked(UItemInstance* ItemObj)
     {
         UItemInstance* MagItem = ItemObj->EquippedMagazine;
         
+        int32 FreeSection = INDEX_NONE;
         int32 FreeX, FreeY;
-        if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpace(MagItem->GetCurrentSize().X, MagItem->GetCurrentSize().Y, FreeX, FreeY) &&
-            GM->InventoryComponent->AddItem(MagItem, FreeX, FreeY))
+        if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpaceAcrossSections(MagItem->GetCurrentSize().X, MagItem->GetCurrentSize().Y, FreeSection, FreeX, FreeY) &&
+            GM->InventoryComponent->AddItemToSection(MagItem, FreeSection, FreeX, FreeY))
         {
             ItemObj->EquippedMagazine = nullptr;
             
@@ -603,11 +670,12 @@ void UEquipmentSlotWidget::HandleUnloadClicked(UItemInstance* ItemObj)
             NewAmmo->bIsExamined = true;
             NewAmmo->bIsRotated = false;
 
+            int32 FreeSection = INDEX_NONE;
             int32 FreeX, FreeY;
             bool bAdded = false;
-            if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpace(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeX, FreeY))
+            if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpaceAcrossSections(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeSection, FreeX, FreeY))
             {
-                bAdded = GM->InventoryComponent->AddItem(NewAmmo, FreeX, FreeY);
+                bAdded = GM->InventoryComponent->AddItemToSection(NewAmmo, FreeSection, FreeX, FreeY);
             }
 
             if (!bAdded) break;

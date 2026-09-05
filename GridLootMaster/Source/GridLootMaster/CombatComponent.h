@@ -77,7 +77,25 @@ enum class ECombatPlayerActionState : uint8
 {
     None,
     Swapping,
-    Reloading
+    Reloading,
+    Moving
+};
+
+UENUM(BlueprintType)
+enum class ECombatMovementAction : uint8
+{
+    Approach,
+    Retreat,
+    Flee
+};
+
+UENUM(BlueprintType)
+enum class ECombatMovementDirection : uint8
+{
+    North,
+    West,
+    East,
+    South
 };
 
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
@@ -127,6 +145,9 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Action")
     float PlayerActionTimeRemaining = 0.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Timing")
+    float CombatMoveActionDuration = 0.4f;
+
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Weapon")
     FName ActiveWeaponSlot = TEXT("Primary1");
 
@@ -157,6 +178,13 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Combat|Weapon")
     bool RequestReload(FName WeaponSlot = NAME_None);
 
+    UFUNCTION(BlueprintCallable, Category = "Combat|Movement")
+    bool RequestCombatMovement(ECombatMovementAction MovementAction);
+
+    UFUNCTION(BlueprintCallable, Category = "Combat|Movement")
+    bool RequestCombatMovementDirection(ECombatMovementAction MovementAction,
+        ECombatMovementDirection Direction);
+
     UFUNCTION(BlueprintCallable, Category = "Combat")
     void EnemyAttackPlayer(float DamageMultiplier = 1.0f);
 
@@ -175,13 +203,28 @@ private:
     void CompletePlayerAction();
     void CancelPlayerAction(const FString& Message);
     bool IsCombatRangeValid(int32 RangeTiles) const;
+    bool CommitCombatMovement();
 
     UPROPERTY()
     FName PendingWeaponSlot = NAME_None;
 
     UPROPERTY()
-    FName PendingReloadAmmoID = NAME_None;
+    FName PendingReloadMagazineID = NAME_None;
+
+    UPROPERTY()
+    TObjectPtr<class UGridInventoryComponent> PendingReloadSource;
+    UPROPERTY()
+    int32 PendingReloadSectionIndex = 0;
+
+    UPROPERTY()
+    FIntPoint PendingReloadGridCoord = FIntPoint::ZeroValue;
 
     UPROPERTY()
     TObjectPtr<class UItemInstance> PendingReloadWeapon;
+
+    UPROPERTY()
+    FIntPoint PendingCombatMoveCoord = FIntPoint::ZeroValue;
+
+    UPROPERTY()
+    ECombatMovementAction PendingCombatMovement = ECombatMovementAction::Approach;
 };

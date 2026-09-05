@@ -8,6 +8,7 @@
 
 class UTextBlock;
 class UGridBoardWidget;
+class USectionedStorageWidget;
 class UEquipmentSlotWidget;
 class UScrollBox;
 class UVerticalBox;
@@ -63,6 +64,24 @@ public:
     UFUNCTION()
     void OnReloadButtonClicked();
     UFUNCTION()
+    void OnCombatMoveButtonClicked();
+    UFUNCTION()
+    void OnCombatDirectionNorthButtonClicked();
+    UFUNCTION()
+    void OnCombatDirectionWestButtonClicked();
+    UFUNCTION()
+    void OnCombatDirectionEastButtonClicked();
+    UFUNCTION()
+    void OnCombatDirectionSouthButtonClicked();
+    UFUNCTION()
+    void OnCombatDirectionCancelButtonClicked();
+    UFUNCTION()
+    void OnApproachButtonClicked();
+    UFUNCTION()
+    void OnRetreatButtonClicked();
+    UFUNCTION()
+    void OnCombatFleeButtonClicked();
+    UFUNCTION()
     void OnPlayerAmbushButtonClicked();
     UFUNCTION()
     void OnAmbushWaitButtonClicked();
@@ -89,10 +108,22 @@ public:
     void OnStartRaidClicked();
 
     UFUNCTION()
+    void RestoreRaidInputFocus();
+
+    void ScheduleRaidInputFocusRestore();
+
+    UFUNCTION()
     void OnExtractButtonClicked();
 
     UFUNCTION()
     void OnDebugSpawnEnemyClicked();
+
+    UFUNCTION()
+    void OnSearchButtonClicked();
+
+    void SetLootInventory(class UGridInventoryComponent* Inventory);
+    void ClearCorpseLootView();
+    void RefreshEnemyMarkers();
 
 public:
     UPROPERTY()
@@ -154,7 +185,7 @@ public:
     UGridBoardWidget* ContainerBoard;
 
     UPROPERTY()
-    UGridBoardWidget* GridBoard;
+    USectionedStorageWidget* GridBoard;
 
     UPROPERTY()
     class UVerticalBox* LeftPanel;
@@ -163,7 +194,7 @@ public:
     UGridBoardWidget* SafeBoxBoard;
 
     UPROPERTY()
-    UGridBoardWidget* RigBoard;
+    USectionedStorageWidget* RigBoard;
 
     UPROPERTY()
     UGridBoardWidget* PocketBoard;
@@ -197,6 +228,9 @@ public:
     class UButton* SearchBtn;
 
     UPROPERTY()
+    UTextBlock* SearchBtnText;
+
+    UPROPERTY()
     class UButton* ExtractBtn;
 
     UPROPERTY()
@@ -213,6 +247,33 @@ public:
 
     UPROPERTY()
     class UButton* ReloadBtn;
+
+    UPROPERTY()
+    class UButton* CombatMoveBtn;
+
+    UPROPERTY()
+    class UButton* CombatDirectionNorthBtn;
+
+    UPROPERTY()
+    class UButton* CombatDirectionWestBtn;
+
+    UPROPERTY()
+    class UButton* CombatDirectionEastBtn;
+
+    UPROPERTY()
+    class UButton* CombatDirectionSouthBtn;
+
+    UPROPERTY()
+    class UButton* CombatDirectionCancelBtn;
+
+    UPROPERTY()
+    class UButton* ApproachBtn;
+
+    UPROPERTY()
+    class UButton* RetreatBtn;
+
+    UPROPERTY()
+    class UButton* CombatFleeBtn;
 
     UPROPERTY()
     class UButton* PlayerAmbushBtn;
@@ -263,5 +324,17 @@ protected:
     bool bEnemyEventLogRaidActive = false;
     bool bLastCombatActive = false;
 
+    enum class ECombatDirectionMode : uint8
+    {
+        None,
+        Move,
+        Flee
+    };
+    ECombatDirectionMode CombatDirectionMode = ECombatDirectionMode::None;
+
+    void SetCombatDirectionMode(ECombatDirectionMode InMode);
+    void RequestCombatDirection(ECombatMovementDirection Direction);
+
     FTimerHandle EventNotificationTimerHandle;
+    bool bRaidFocusRestorePending = false;
 };

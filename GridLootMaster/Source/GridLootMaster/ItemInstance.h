@@ -40,6 +40,9 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "Item Data")
     FIntPoint BaseSize;
 
+    UPROPERTY(BlueprintReadWrite, Category = "Storage")
+    FString StorageLayoutSpec;
+
     UPROPERTY(BlueprintReadWrite, Category = "Item Data")
     bool bIsRotated;
 

@@ -179,12 +179,13 @@ bool UModSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDropEv
     if (EquippedMod)
     {
         FIntPoint Size = EquippedMod->GetCurrentSize();
+        int32 FreeSection = INDEX_NONE;
         int32 FreeX, FreeY;
         const bool bCanStoreEquippedMod = ItemDropOp->SourceInventory == GM->InventoryComponent
-            ? GM->InventoryComponent->FindEmptySpaceExcluding(Size.X, Size.Y, ItemDropOp->ItemObj->InstanceID, FreeX, FreeY)
-            : GM->InventoryComponent->FindEmptySpace(Size.X, Size.Y, FreeX, FreeY);
+            ? GM->InventoryComponent->FindEmptySpaceAcrossSectionsExcluding(Size.X, Size.Y, ItemDropOp->ItemObj->InstanceID, FreeSection, FreeX, FreeY)
+            : GM->InventoryComponent->FindEmptySpaceAcrossSections(Size.X, Size.Y, FreeSection, FreeX, FreeY);
         if (bCanStoreEquippedMod &&
-            GM->InventoryComponent->AddItem(EquippedMod, FreeX, FreeY))
+            GM->InventoryComponent->AddItemToSection(EquippedMod, FreeSection, FreeX, FreeY))
         {
             // 새 출처 제거가 실패하면 방금 보관한 기존 모드를 되돌립니다.
             bool bSourceRemoved = false;
@@ -285,9 +286,10 @@ FReply UModSlotWidget::NativeOnMouseButtonDoubleClick(const FGeometry& InGeometr
             if (!bWeaponIsEquipped || !bModMatchesSlot) return Super::NativeOnMouseButtonDoubleClick(InGeometry, InMouseEvent);
 
             FIntPoint Size = EquippedMod->GetCurrentSize();
+            int32 FreeSection = INDEX_NONE;
             int32 FreeX, FreeY;
-            if (GM->InventoryComponent->FindEmptySpace(Size.X, Size.Y, FreeX, FreeY) &&
-                GM->InventoryComponent->AddItem(EquippedMod, FreeX, FreeY))
+            if (GM->InventoryComponent->FindEmptySpaceAcrossSections(Size.X, Size.Y, FreeSection, FreeX, FreeY) &&
+                GM->InventoryComponent->AddItemToSection(EquippedMod, FreeSection, FreeX, FreeY))
             {
                 if (AllowedType == EAttachmentType::Sight) WeaponObj->EquippedSight = nullptr;
                 else if (AllowedType == EAttachmentType::Muzzle) WeaponObj->EquippedMuzzle = nullptr;
@@ -379,10 +381,11 @@ void UModSlotWidget::NativeOnDragCancelled(const FDragDropEvent& InDragDropEvent
     if (GM && GM->InventoryComponent)
     {
         const FIntPoint Size = ItemDropOp->ItemObj->GetCurrentSize();
+        int32 FreeSection = INDEX_NONE;
         int32 FreeX = 0;
         int32 FreeY = 0;
-        if (GM->InventoryComponent->FindEmptySpace(Size.X, Size.Y, FreeX, FreeY) &&
-            GM->InventoryComponent->AddItem(ItemDropOp->ItemObj, FreeX, FreeY))
+        if (GM->InventoryComponent->FindEmptySpaceAcrossSections(Size.X, Size.Y, FreeSection, FreeX, FreeY) &&
+            GM->InventoryComponent->AddItemToSection(ItemDropOp->ItemObj, FreeSection, FreeX, FreeY))
         {
             GM->InventoryComponent->OnInventoryChanged.Broadcast();
             return;
@@ -436,9 +439,10 @@ void UModSlotWidget::HandleUnequipClicked(UItemInstance* ModObj)
     if (!bModMatchesSlot) return;
 
     FIntPoint Size = ModObj->GetCurrentSize();
+    int32 FreeSection = INDEX_NONE;
     int32 FreeX, FreeY;
-    if (GM->InventoryComponent->FindEmptySpace(Size.X, Size.Y, FreeX, FreeY) &&
-        GM->InventoryComponent->AddItem(ModObj, FreeX, FreeY))
+    if (GM->InventoryComponent->FindEmptySpaceAcrossSections(Size.X, Size.Y, FreeSection, FreeX, FreeY) &&
+        GM->InventoryComponent->AddItemToSection(ModObj, FreeSection, FreeX, FreeY))
     {
         if (AllowedType == EAttachmentType::Sight) WeaponObj->EquippedSight = nullptr;
         else if (AllowedType == EAttachmentType::Muzzle) WeaponObj->EquippedMuzzle = nullptr;
@@ -490,11 +494,12 @@ void UModSlotWidget::HandleUnloadClicked(UItemInstance* ModObj)
             NewAmmo->bIsExamined = true;
             NewAmmo->bIsRotated = false;
 
+            int32 FreeSection = INDEX_NONE;
             int32 FreeX, FreeY;
             bool bAdded = false;
-            if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpace(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeX, FreeY))
+            if (GM->InventoryComponent && GM->InventoryComponent->FindEmptySpaceAcrossSections(NewAmmo->GetCurrentSize().X, NewAmmo->GetCurrentSize().Y, FreeSection, FreeX, FreeY))
             {
-                bAdded = GM->InventoryComponent->AddItem(NewAmmo, FreeX, FreeY);
+                bAdded = GM->InventoryComponent->AddItemToSection(NewAmmo, FreeSection, FreeX, FreeY);
             }
 
             if (!bAdded) break;

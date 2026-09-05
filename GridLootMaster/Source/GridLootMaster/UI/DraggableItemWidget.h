@@ -23,6 +23,9 @@ public:
     UPROPERTY(BlueprintReadWrite, Category = "Inventory")
     class UGridInventoryComponent* SourceInventory;
 
+    UPROPERTY(BlueprintReadWrite, Category = "Inventory")
+    int32 SourceSectionIndex = 0;
+
     UPROPERTY(BlueprintAssignable, Category = "Item")
     FOnItemRightClicked OnRightClicked;
 

@@ -24,6 +24,15 @@ public:
     class UBorder* WestWall;
 
     UPROPERTY()
+    class USizeBox* NorthWallBox;
+    UPROPERTY()
+    class USizeBox* SouthWallBox;
+    UPROPERTY()
+    class USizeBox* EastWallBox;
+    UPROPERTY()
+    class USizeBox* WestWallBox;
+
+    UPROPERTY()
     class UImage* PlayerIcon;
 
     UPROPERTY()
@@ -44,7 +53,8 @@ public:
     FIntPoint TileCoord;
     class UMinimapWidget* ParentMinimap;
 
-    void InitTile(const FTileData& InData, class UMinimapWidget* InParent, float InTileSize = 64.0f);
+    void InitTile(const FTileData& InData, class UMinimapWidget* InParent, float InTileSize = 64.0f,
+        bool bInRenderSouthEdge = true, bool bInRenderEastEdge = true);
     void RefreshTileData(const FTileData& InData);
     void SetIsPath(bool bIsPath);
     void SetHasPlayer(bool bHasPlayer);
@@ -60,5 +70,10 @@ protected:
 
     UFUNCTION()
     void OnTileButtonClicked();
+
+private:
+    bool bRenderSouthEdge = true;
+    bool bRenderEastEdge = true;
+    bool bCompactTile = false;
 
 };

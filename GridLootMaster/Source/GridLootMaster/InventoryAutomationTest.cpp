@@ -9,6 +9,7 @@
 #include "UObject/SoftObjectPath.h"
 #include "GridGameMode.h"
 #include "GridInventoryComponent.h"
+#include "EquipmentComponent.h"
 #include "ItemInstance.h"
 #include "UI/InspectWidget.h"
 #include "UI/MainGameUI.h"
@@ -829,6 +830,193 @@ bool FGridLootMasterInitFromDataResetsStateTest::RunTest(const FString& Paramete
     TestNull(TEXT("Data initialization clears a stale sight"), ReusedItem->EquippedSight);
     TestNull(TEXT("Data initialization clears a stale muzzle"), ReusedItem->EquippedMuzzle);
     TestNull(TEXT("Data initialization clears a stale magazine"), ReusedItem->EquippedMagazine);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterStorageLayoutParserTest,
+    "GridLootMaster.Inventory.DynamicStorage.ParseLayoutSpec",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterStorageLayoutParserTest::RunTest(const FString& Parameters)
+{
+    TArray<FIntPoint> Sections;
+    TestTrue(TEXT("The default layout parses"), UGridInventoryComponent::ParseStorageLayoutSpec(TEXT("5x6"), Sections));
+    TestEqual(TEXT("The default layout has one section"), Sections.Num(), 1);
+    TestEqual(TEXT("The default section size is 5x6"), Sections[0], FIntPoint(5, 6));
+    TestTrue(TEXT("A repeated multi-section layout parses"), UGridInventoryComponent::ParseStorageLayoutSpec(TEXT("1x2*4; 1x1*2"), Sections));
+    TestEqual(TEXT("The repeated layout expands to six sections"), Sections.Num(), 6);
+    TestEqual(TEXT("The fifth section keeps its size"), Sections[4], FIntPoint(1, 1));
+    TestFalse(TEXT("Zero-sized entries are rejected"), UGridInventoryComponent::ParseStorageLayoutSpec(TEXT("0x2"), Sections));
+    TestFalse(TEXT("Malformed entries are rejected"), UGridInventoryComponent::ParseStorageLayoutSpec(TEXT("1x2*bad"), Sections));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterIndependentStorageSectionsTest,
+    "GridLootMaster.Inventory.DynamicStorage.IndependentSections",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterIndependentStorageSectionsTest::RunTest(const FString& Parameters)
+{
+    UGridInventoryComponent* Inventory = NewObject<UGridInventoryComponent>();
+    TestNotNull(TEXT("A sectioned inventory is created"), Inventory);
+    if (!Inventory) return false;
+    TArray<FIntPoint> Sections = { FIntPoint(1, 2), FIntPoint(1, 2) };
+    TestTrue(TEXT("Two independent sections initialize"), Inventory->InitializeSections(Sections));
+    UItemInstance* Item = NewObject<UItemInstance>(Inventory);
+    Item->InstanceID = TEXT("SectionItem");
+    Item->BaseSize = FIntPoint(2, 2);
+    TestFalse(TEXT("An item cannot span adjacent sections"), Inventory->CheckItemFitInSection(Item->InstanceID, 0, 0, 0, 2, 2));
+    Item->BaseSize = FIntPoint(1, 2);
+    TestTrue(TEXT("The item fits in section zero"), Inventory->AddItemToSection(Item, 0, 0, 0));
+    TestTrue(TEXT("The same item can move to section one"), Inventory->AddItemToSection(Item, 1, 0, 0));
+    int32 SectionIndex = INDEX_NONE, X = INDEX_NONE, Y = INDEX_NONE;
+    TestTrue(TEXT("Placement reports the destination section"), Inventory->FindItemPlacement(Item->InstanceID, SectionIndex, X, Y));
+    TestEqual(TEXT("Placement is in section one"), SectionIndex, 1);
+    TestEqual(TEXT("Section zero is clear after the move"), Inventory->GetCellItemID(0, 0, 0), NAME_None);
+    Inventory->ClearInventory();
+    TestEqual(TEXT("Clear preserves the section count"), Inventory->GetSectionCount(), 2);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterStorageReconfigureTransactionTest,
+    "GridLootMaster.Inventory.DynamicStorage.ReconfigureIsTransactional",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterStorageReconfigureTransactionTest::RunTest(const FString& Parameters)
+{
+    UGridInventoryComponent* Inventory = NewObject<UGridInventoryComponent>();
+    if (!Inventory) return false;
+    Inventory->InitializeGrid(3, 2);
+    UItemInstance* Item = NewObject<UItemInstance>(Inventory);
+    Item->InstanceID = TEXT("ReconfigureItem");
+    Item->BaseSize = FIntPoint(2, 1);
+    Item->bIsRotated = true;
+    TestTrue(TEXT("The rotated item is initially placed"), Inventory->AddItem(Item, 0, 0));
+    TestTrue(TEXT("A larger layout reconfigures successfully"), Inventory->ReconfigureSections({ FIntPoint(1, 2), FIntPoint(1, 2) }));
+    TestEqual(TEXT("The item keeps its rotation"), Item->bIsRotated, true);
+    int32 SectionIndex = INDEX_NONE, X = INDEX_NONE, Y = INDEX_NONE;
+    TestTrue(TEXT("The item remains placed after reconfigure"), Inventory->FindItemPlacement(Item->InstanceID, SectionIndex, X, Y));
+    const int32 PreviousSectionCount = Inventory->GetSectionCount();
+    const FName PreviousCell = Inventory->GetCellItemID(SectionIndex, X, Y);
+    TestFalse(TEXT("An insufficient layout is rejected"), Inventory->ReconfigureSections({ FIntPoint(1, 1) }));
+    TestEqual(TEXT("A failed reconfigure preserves the layout"), Inventory->GetSectionCount(), PreviousSectionCount);
+    TestEqual(TEXT("A failed reconfigure preserves the item cell"), Inventory->GetCellItemID(SectionIndex, X, Y), PreviousCell);
+    TestEqual(TEXT("A failed reconfigure preserves the item object"), Inventory->GetItemInstance(Item->InstanceID), Item);
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterDynamicStorageAutomaticStoreTest,
+    "GridLootMaster.Inventory.DynamicStorage.AutomaticStoreUsesLaterSection",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterDynamicStorageAutomaticStoreTest::RunTest(const FString& Parameters)
+{
+    UGridInventoryComponent* Inventory = NewObject<UGridInventoryComponent>();
+    if (!Inventory) return false;
+    Inventory->InitializeSections({ FIntPoint(1, 1), FIntPoint(2, 1) });
+    UItemInstance* SectionZeroBlocker = NewObject<UItemInstance>(Inventory);
+    SectionZeroBlocker->InstanceID = TEXT("SectionZeroBlocker");
+    SectionZeroBlocker->BaseSize = FIntPoint(1, 1);
+    TestTrue(TEXT("Section zero is occupied"), Inventory->AddItemToSection(SectionZeroBlocker, 0, 0, 0));
+
+    UItemInstance* StoredItem = NewObject<UItemInstance>(Inventory);
+    StoredItem->InstanceID = TEXT("LaterSectionItem");
+    StoredItem->BaseSize = FIntPoint(2, 1);
+    int32 SectionIndex = INDEX_NONE, X = INDEX_NONE, Y = INDEX_NONE;
+    TestTrue(TEXT("Automatic storage finds a later section"), Inventory->FindEmptySpaceAcrossSections(
+        2, 1, SectionIndex, X, Y));
+    TestEqual(TEXT("The later section is selected"), SectionIndex, 1);
+    TestTrue(TEXT("The item is added to the selected section"), Inventory->AddItemToSection(StoredItem, SectionIndex, X, Y));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterDynamicStorageReservedRollbackTest,
+    "GridLootMaster.Inventory.DynamicStorage.ReservedOriginalPlacement",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterDynamicStorageReservedRollbackTest::RunTest(const FString& Parameters)
+{
+    UGridInventoryComponent* Inventory = NewObject<UGridInventoryComponent>();
+    if (!Inventory) return false;
+    Inventory->InitializeSections({ FIntPoint(2, 1), FIntPoint(1, 1) });
+    UItemInstance* Incoming = NewObject<UItemInstance>(Inventory);
+    Incoming->InstanceID = TEXT("IncomingOriginal");
+    Incoming->BaseSize = FIntPoint(1, 1);
+    TestTrue(TEXT("Incoming item has an original placement"), Inventory->AddItemToSection(Incoming, 0, 0, 0));
+    UItemInstance* Previous = NewObject<UItemInstance>(Inventory);
+    Previous->InstanceID = TEXT("PreviousEquipment");
+    Previous->BaseSize = FIntPoint(1, 1);
+    int32 SectionIndex = INDEX_NONE, X = INDEX_NONE, Y = INDEX_NONE;
+    TestTrue(TEXT("Previous equipment avoids the reserved incoming placement"), Inventory->FindEmptySpaceAcrossSectionsExcludingPlacement(
+        1, 1, Incoming->InstanceID, 0, 0, 0, 1, 1, SectionIndex, X, Y));
+    TestFalse(TEXT("Previous equipment does not reuse the incoming original cell"), SectionIndex == 0 && X == 0 && Y == 0);
+    TestTrue(TEXT("Previous equipment can be placed without overwriting the reservation"), Inventory->AddItemToSection(Previous, SectionIndex, X, Y));
+    return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(
+    FGridLootMasterStorageUnequipGuardTest,
+    "GridLootMaster.Inventory.DynamicStorage.StorageUnequipSemantics",
+    EAutomationTestFlags_ApplicationContextMask | EAutomationTestFlags::EngineFilter)
+
+bool FGridLootMasterStorageUnequipGuardTest::RunTest(const FString& Parameters)
+{
+    AGridGameMode* GameMode = NewObject<AGridGameMode>();
+    if (!GameMode) return false;
+    GameMode->InventoryComponent->InitializeSections({ FIntPoint(1, 1), FIntPoint(1, 1) });
+    GameMode->RigComponent->InitializeSections({ FIntPoint(1, 1) });
+    GameMode->StashComponent->InitializeGrid(2, 1);
+
+    UItemInstance* Rig = NewObject<UItemInstance>(GameMode);
+    Rig->InstanceID = TEXT("EmptyRig");
+    Rig->BaseSize = FIntPoint(1, 1);
+    Rig->StorageLayoutSpec = TEXT("1x1");
+    UItemInstance* BackpackBlocker = NewObject<UItemInstance>(GameMode);
+    BackpackBlocker->InstanceID = TEXT("BackpackBlocker");
+    BackpackBlocker->BaseSize = FIntPoint(1, 1);
+    TestTrue(TEXT("Backpack section zero is occupied"), GameMode->InventoryComponent->AddItemToSection(BackpackBlocker, 0, 0, 0));
+    TestTrue(TEXT("Empty Rig standalone unequip succeeds"), GameMode->EquipmentComponent->EquipItem(TEXT("Rig"), Rig));
+    TestTrue(TEXT("Empty Rig moves to a later Backpack section"), GameMode->TryStandaloneStorageUnequip(TEXT("Rig"), Rig));
+    TestEqual(TEXT("Unequipped Rig storage has no sections"), GameMode->RigComponent->GetSectionCount(), 0);
+    int32 DisabledSection = INDEX_NONE, DisabledX = INDEX_NONE, DisabledY = INDEX_NONE;
+    TestFalse(TEXT("Disabled Rig storage cannot find space"), GameMode->RigComponent->FindEmptySpaceAcrossSections(1, 1, DisabledSection, DisabledX, DisabledY));
+    TestTrue(TEXT("Re-equipping storage restores its layout"), GameMode->ReconfigureStorageForEquipmentSlot(TEXT("Rig"), Rig));
+    TestEqual(TEXT("Re-equipped Rig layout is active"), GameMode->RigComponent->GetSectionCount(), 1);
+    GameMode->InventoryComponent->RemoveItem(Rig->InstanceID);
+    GameMode->InventoryComponent->RemoveItem(BackpackBlocker->InstanceID);
+    TestTrue(TEXT("Rig can be equipped again"), GameMode->EquipmentComponent->EquipItem(TEXT("Rig"), Rig));
+
+    UItemInstance* RigContent = NewObject<UItemInstance>(GameMode);
+    RigContent->InstanceID = TEXT("RigContent");
+    RigContent->BaseSize = FIntPoint(1, 1);
+    TestTrue(TEXT("Rig content can be seeded"), GameMode->RigComponent->AddItem(RigContent, 0, 0));
+    TestTrue(TEXT("Nonempty Rig standalone unequip is rejected"), !GameMode->TryStandaloneStorageUnequip(TEXT("Rig"), Rig));
+
+    GameMode->RigComponent->RemoveItem(RigContent->InstanceID);
+    GameMode->EquipmentComponent->RemoveItemBySlotID(TEXT("Rig"));
+    GameMode->InventoryComponent->ClearInventory();
+    GameMode->InventoryComponent->DisableStorage();
+    UItemInstance* Backpack = NewObject<UItemInstance>(GameMode);
+    Backpack->InstanceID = TEXT("EmptyBackpack");
+    Backpack->BaseSize = FIntPoint(1, 1);
+    Backpack->StorageLayoutSpec = TEXT("1x1;1x1");
+    TestTrue(TEXT("Backpack can be equipped"), GameMode->EquipmentComponent->EquipItem(TEXT("Backpack"), Backpack));
+    TestTrue(TEXT("Empty Backpack lobby unequip moves to Stash"), GameMode->TryStandaloneStorageUnequip(TEXT("Backpack"), Backpack));
+    TestEqual(TEXT("Unequipped Backpack storage has no sections"), GameMode->InventoryComponent->GetSectionCount(), 0);
+    TestTrue(TEXT("Backpack re-equips with its layout"), GameMode->ReconfigureStorageForEquipmentSlot(TEXT("Backpack"), Backpack));
+    GameMode->StashComponent->RemoveItem(Backpack->InstanceID);
+    TestTrue(TEXT("Backpack can be equipped again"), GameMode->EquipmentComponent->EquipItem(TEXT("Backpack"), Backpack));
+
+    UItemInstance* BackpackContent = NewObject<UItemInstance>(GameMode);
+    BackpackContent->InstanceID = TEXT("BackpackContent");
+    BackpackContent->BaseSize = FIntPoint(1, 1);
+    TestTrue(TEXT("Backpack content can be seeded"), GameMode->InventoryComponent->AddItem(BackpackContent, 0, 0));
+    TestTrue(TEXT("Nonempty Backpack standalone unequip is rejected"), !GameMode->TryStandaloneStorageUnequip(TEXT("Backpack"), Backpack));
     return true;
 }
 

@@ -128,6 +128,20 @@ bool UEnemyManagerComponent::HasEnemyAt(FIntPoint Coordinate) const
     return OccupiedTiles.Contains(Coordinate);
 }
 
+bool UEnemyManagerComponent::FindDeadEnemyAt(FIntPoint Coordinate, FName& OutInstanceID) const
+{
+    OutInstanceID = NAME_None;
+    for (const FEnemyWorldInstance& Instance : EnemyInstances)
+    {
+        if (!Instance.bAlive && Instance.WorldState == EEnemyWorldState::Dead && Instance.Coordinate == Coordinate &&
+            (OutInstanceID.IsNone() || Instance.InstanceID.ToString() < OutInstanceID.ToString()))
+        {
+            OutInstanceID = Instance.InstanceID;
+        }
+    }
+    return !OutInstanceID.IsNone();
+}
+
 int32 UEnemyManagerComponent::GetAliveEnemyCount() const
 {
     int32 AliveCount = 0;
@@ -643,7 +657,7 @@ void UEnemyManagerComponent::SyncCombatContact()
         return;
     }
 
-    const AGridGameMode* GameMode = Cast<AGridGameMode>(GetOwner());
+    AGridGameMode* GameMode = Cast<AGridGameMode>(GetOwner());
     if (!GameMode || (GameMode->CombatComponent && GameMode->CombatComponent->bHasActiveEnemy))
     {
         return;
@@ -658,6 +672,7 @@ void UEnemyManagerComponent::SyncCombatContact()
                 Instance.bAlive = false;
                 Instance.WorldState = EEnemyWorldState::Dead;
                 OccupiedTiles.Remove(Instance.Coordinate);
+                GameMode->RefreshEnemyWorldUI();
             }
             else
             {
@@ -666,6 +681,28 @@ void UEnemyManagerComponent::SyncCombatContact()
         }
     }
     ActiveEnemyInstanceID = NAME_None;
+}
+
+#if WITH_DEV_AUTOMATION_TESTS
+bool UEnemyManagerComponent::MarkEnemyDeadForTest(FName InstanceID)
+{
+    for (FEnemyWorldInstance& Instance : EnemyInstances)
+    {
+        if (Instance.InstanceID == InstanceID && Instance.bAlive)
+        {
+            Instance.bAlive = false;
+            Instance.WorldState = EEnemyWorldState::Dead;
+            OccupiedTiles.Remove(Instance.Coordinate);
+            return true;
+        }
+    }
+    return false;
+}
+#endif
+
+void UEnemyManagerComponent::EndCombatContact()
+{
+    SyncCombatContact();
 }
 
 bool UEnemyManagerComponent::DoesEnemyDetectPlayer(const FEnemyWorldInstance& Instance) const

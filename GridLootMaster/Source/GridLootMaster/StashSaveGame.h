@@ -90,4 +90,7 @@ public:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stash")
     TArray<FStashItemRecord> Items;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stash")
+    int32 InitialQAMagazineSeedVersion = 0;
 };

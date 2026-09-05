@@ -8,6 +8,7 @@
 #include "Components/OverlaySlot.h"
 #include "Components/SizeBox.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Input/Reply.h"
 
 void UMinimapTileWidget::NativeConstruct()
@@ -15,10 +16,14 @@ void UMinimapTileWidget::NativeConstruct()
     Super::NativeConstruct();
 }
 
-void UMinimapTileWidget::InitTile(const FTileData& InData, UMinimapWidget* InParent, float InTileSize)
+void UMinimapTileWidget::InitTile(const FTileData& InData, UMinimapWidget* InParent, float InTileSize,
+    bool bInRenderSouthEdge, bool bInRenderEastEdge)
 {
     ParentMinimap = InParent;
     TileCoord = InData.Coordinate;
+    bRenderSouthEdge = bInRenderSouthEdge;
+    bRenderEastEdge = bInRenderEastEdge;
+    bCompactTile = InTileSize <= 24.0f;
 
     if (!WidgetTree)
     {
@@ -38,12 +43,22 @@ void UMinimapTileWidget::InitTile(const FTileData& InData, UMinimapWidget* InPar
     TransparentButtonStyle.SetHovered(EmptyBrush);
     TransparentButtonStyle.SetPressed(EmptyBrush);
     TransparentButtonStyle.SetDisabled(EmptyBrush);
+    // Tile 간 시각적 틈이 생기지 않도록 Button 내부 패딩도 제거합니다.
+    TransparentButtonStyle.SetNormalPadding(FMargin(0.0f));
+    TransparentButtonStyle.SetPressedPadding(FMargin(0.0f));
     ClickButton->SetStyle(TransparentButtonStyle);
     ClickButton->OnClicked.AddDynamic(this, &UMinimapTileWidget::OnTileButtonClicked);
     RootBox->AddChild(ClickButton);
 
     UOverlay* Overlay = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
-    ClickButton->AddChild(Overlay);
+    if (UButtonSlot* ButtonContentSlot = Cast<UButtonSlot>(ClickButton->AddChild(Overlay)))
+    {
+        // UButtonSlot의 기본 ContentPadding 때문에 타일 색 영역이 안쪽으로 줄어들어
+        // 타일 사이에 큰 틈이 있는 것처럼 보이던 문제를 제거합니다.
+        ButtonContentSlot->SetPadding(FMargin(0.0f));
+        ButtonContentSlot->SetHorizontalAlignment(HAlign_Fill);
+        ButtonContentSlot->SetVerticalAlignment(VAlign_Fill);
+    }
 
     // 1. 구역별 배경색
     BackgroundBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
@@ -153,27 +168,51 @@ void UMinimapTileWidget::InitTile(const FTileData& InData, UMinimapWidget* InPar
     }
 
     // 5. 4면 벽(Edge) 표시
-    auto CreateWall = [&](bool bIsOpen, EVerticalAlignment VAlign, EHorizontalAlignment HAlign) {
-        UBorder* Wall = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-        Wall->SetBrushColor(bIsOpen ? FLinearColor(0.0f, 0.0f, 0.0f, 0.1f) : FLinearColor(0.0f, 0.0f, 0.0f, 1.0f));
-        Wall->SetVisibility(ESlateVisibility::HitTestInvisible);
-        if (UOverlaySlot* WallSlot = Cast<UOverlaySlot>(Overlay->AddChild(Wall)))
+    // Padding으로 두께를 흉내 내면 East/West 벽이 0폭에 가깝게 배치될 수 있으므로
+    // 실제 SizeBox 막대를 Edge에 붙여서 렌더링합니다. 입력은 계속 ClickButton이 받습니다.
+    auto CreateWall = [&](bool bIsOpen, bool bOwnedEdge, bool bHorizontal,
+        EVerticalAlignment VAlign, EHorizontalAlignment HAlign,
+        USizeBox*& OutWallBox, UBorder*& OutWall)
+    {
+        const bool bCompact = bCompactTile;
+        const float OpenThickness = 1.0f;
+        // Compact에서도 실제 벽이 명확히 읽히도록 과거 가독성 좋은 비율에 가깝게 둡니다.
+        const float ClosedThickness = bCompact ? 3.0f : 4.0f;
+        const float Thickness = bIsOpen ? OpenThickness : ClosedThickness;
+
+        const FLinearColor OpenGridColor(0.10f, 0.10f, 0.10f, bCompact ? 0.35f : 0.45f);
+        const FLinearColor ClosedWallColor(0.02f, 0.02f, 0.02f, 1.0f);
+
+        OutWallBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+        OutWallBox->SetVisibility(bOwnedEdge ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
+        if (bHorizontal)
         {
-            WallSlot->SetHorizontalAlignment(HAlign);
-            WallSlot->SetVerticalAlignment(VAlign);
-            const float EdgePadding = FMath::Max(0.0f, InTileSize - 4.0f);
-            if (VAlign == VAlign_Top) WallSlot->SetPadding(FMargin(0, 0, 0, EdgePadding));
-            else if (VAlign == VAlign_Bottom) WallSlot->SetPadding(FMargin(0, EdgePadding, 0, 0));
-            else if (HAlign == HAlign_Left) WallSlot->SetPadding(FMargin(0, 0, EdgePadding, 0));
-            else if (HAlign == HAlign_Right) WallSlot->SetPadding(FMargin(EdgePadding, 0, 0, 0));
+            OutWallBox->SetHeightOverride(Thickness);
         }
-        return Wall;
+        else
+        {
+            OutWallBox->SetWidthOverride(Thickness);
+        }
+
+        OutWall = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+        OutWall->SetBrushColor(bIsOpen ? OpenGridColor : ClosedWallColor);
+        OutWall->SetVisibility(ESlateVisibility::HitTestInvisible);
+        OutWall->SetPadding(FMargin(0.0f));
+        OutWallBox->AddChild(OutWall);
+
+        if (UOverlaySlot* WallSlot = Cast<UOverlaySlot>(Overlay->AddChild(OutWallBox)))
+        {
+            WallSlot->SetHorizontalAlignment(bHorizontal ? HAlign_Fill : HAlign);
+            WallSlot->SetVerticalAlignment(bHorizontal ? VAlign : VAlign_Fill);
+        }
     };
 
-    NorthWall = CreateWall(InData.bOpenNorth, VAlign_Top, HAlign_Fill);
-    SouthWall = CreateWall(InData.bOpenSouth, VAlign_Bottom, HAlign_Fill);
-    WestWall = CreateWall(InData.bOpenWest, VAlign_Fill, HAlign_Left);
-    EastWall = CreateWall(InData.bOpenEast, VAlign_Fill, HAlign_Right);
+    // 벽은 양쪽 타일 면에 모두 그립니다. 예를 들어 A의 East가 막혀 있고 B의 West도 막혀 있으면
+    // 경계 양쪽 안쪽에 각각 Wall Bar가 생겨 과거 미니맵처럼 실제 벽 두께가 더 명확하게 보입니다.
+    CreateWall(InData.bOpenNorth, true, true, VAlign_Top, HAlign_Fill, NorthWallBox, NorthWall);
+    CreateWall(InData.bOpenSouth, bRenderSouthEdge, true, VAlign_Bottom, HAlign_Fill, SouthWallBox, SouthWall);
+    CreateWall(InData.bOpenWest, true, false, VAlign_Fill, HAlign_Left, WestWallBox, WestWall);
+    CreateWall(InData.bOpenEast, bRenderEastEdge, false, VAlign_Fill, HAlign_Right, EastWallBox, EastWall);
 
 }
 
@@ -234,18 +273,31 @@ void UMinimapTileWidget::RefreshTileData(const FTileData& InData)
         ZoneText->SetText(FText::FromString(ZonePrefix));
     }
 
-    auto RefreshWall = [](UBorder* Wall, bool bIsOpen) {
-        if (Wall)
+    auto RefreshWall = [](USizeBox* WallBox, UBorder* Wall, bool bIsOpen, bool bOwnedEdge,
+        bool bHorizontal, bool bCompact)
+    {
+        if (!WallBox || !Wall) return;
+
+        const float Thickness = bIsOpen ? 1.0f : (bCompact ? 3.0f : 4.0f);
+        if (bHorizontal)
         {
-            Wall->SetBrushColor(bIsOpen
-                ? FLinearColor(0.0f, 0.0f, 0.0f, 0.1f)
-                : FLinearColor(0.0f, 0.0f, 0.0f, 1.0f));
+            WallBox->SetHeightOverride(Thickness);
         }
+        else
+        {
+            WallBox->SetWidthOverride(Thickness);
+        }
+
+        Wall->SetBrushColor(bIsOpen
+            ? FLinearColor(0.10f, 0.10f, 0.10f, bCompact ? 0.35f : 0.45f)
+            : FLinearColor(0.02f, 0.02f, 0.02f, 1.0f));
+        WallBox->SetVisibility(bOwnedEdge ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
     };
-    RefreshWall(NorthWall, InData.bOpenNorth);
-    RefreshWall(SouthWall, InData.bOpenSouth);
-    RefreshWall(WestWall, InData.bOpenWest);
-    RefreshWall(EastWall, InData.bOpenEast);
+
+    RefreshWall(NorthWallBox, NorthWall, InData.bOpenNorth, true, true, bCompactTile);
+    RefreshWall(SouthWallBox, SouthWall, InData.bOpenSouth, bRenderSouthEdge, true, bCompactTile);
+    RefreshWall(WestWallBox, WestWall, InData.bOpenWest, true, false, bCompactTile);
+    RefreshWall(EastWallBox, EastWall, InData.bOpenEast, bRenderEastEdge, false, bCompactTile);
 }
 
 void UMinimapTileWidget::SetIsPath(bool bIsPath)
@@ -268,7 +320,7 @@ void UMinimapTileWidget::SetEnemyDebugMarker(bool bVisible, const FString& Marke
     const FLinearColor& MarkerColor, const FString& TooltipText)
 {
 #if UE_BUILD_SHIPPING
-    bVisible = false;
+    bVisible = bVisible && MarkerText == TEXT("D");
 #endif
     if (EnemyMarkerBorder)
     {

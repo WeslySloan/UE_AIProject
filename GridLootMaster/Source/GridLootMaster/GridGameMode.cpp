@@ -104,6 +104,65 @@ FName AGridGameMode::FindCompatibleAmmoID(const UItemInstance* Magazine) const
     return NAME_None;
 }
 
+bool AGridGameMode::ReconfigureStorageForEquipmentSlot(FName SlotID, const UItemInstance* StorageItem)
+{
+    UGridInventoryComponent* Storage = SlotID == TEXT("Backpack") ? InventoryComponent :
+        (SlotID == TEXT("Rig") ? RigComponent : nullptr);
+    if (!Storage || !StorageItem || StorageItem->StorageLayoutSpec.IsEmpty()) return false;
+    TArray<FIntPoint> SectionSizes;
+    if (!UGridInventoryComponent::ParseStorageLayoutSpec(StorageItem->StorageLayoutSpec, SectionSizes))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("Rejected invalid storage layout for %s: %s"), *SlotID.ToString(), *StorageItem->StorageLayoutSpec);
+        return false;
+    }
+    return Storage->ReconfigureSections(SectionSizes);
+}
+
+bool AGridGameMode::TryStandaloneStorageUnequip(FName SlotID, UItemInstance* Item)
+{
+    if (!Item || !EquipmentComponent || EquipmentComponent->GetEquippedItem(SlotID) != Item) return false;
+
+    if (SlotID == TEXT("Rig"))
+    {
+        if (!RigComponent || !InventoryComponent || RigComponent->ItemInstances.Num() > 0) return false;
+
+        int32 Section = INDEX_NONE;
+        int32 X = INDEX_NONE;
+        int32 Y = INDEX_NONE;
+        const FIntPoint Size = Item->GetCurrentSize();
+        if (!InventoryComponent->FindEmptySpaceAcrossSections(Size.X, Size.Y, Section, X, Y) ||
+            !InventoryComponent->AddItemToSection(Item, Section, X, Y)) return false;
+
+        if (!EquipmentComponent->RemoveItemByInstanceID(Item->InstanceID) || !RigComponent->DisableStorage())
+        {
+            const bool bRestored = InventoryComponent->RemoveItem(Item->InstanceID) && EquipmentComponent->EquipItem(SlotID, Item);
+            if (!bRestored) UE_LOG(LogTemp, Error, TEXT("Rig standalone unequip rollback failed for %s"), *Item->InstanceID.ToString());
+            return false;
+        }
+        return true;
+    }
+
+    if (SlotID == TEXT("Backpack"))
+    {
+        if (RaidState != ERaidState::Lobby || !InventoryComponent || !StashComponent || InventoryComponent->ItemInstances.Num() > 0) return false;
+
+        int32 X = INDEX_NONE;
+        int32 Y = INDEX_NONE;
+        const FIntPoint Size = Item->GetCurrentSize();
+        if (!StashComponent->FindEmptySpace(Size.X, Size.Y, X, Y) || !StashComponent->AddItem(Item, X, Y)) return false;
+
+        if (!EquipmentComponent->RemoveItemByInstanceID(Item->InstanceID) || !InventoryComponent->DisableStorage())
+        {
+            const bool bRestored = StashComponent->RemoveItem(Item->InstanceID) && EquipmentComponent->EquipItem(SlotID, Item);
+            if (!bRestored) UE_LOG(LogTemp, Error, TEXT("Backpack standalone unequip rollback failed for %s"), *Item->InstanceID.ToString());
+            return false;
+        }
+        return true;
+    }
+
+    return false;
+}
+
 void AGridGameMode::BeginPlay()
 {
     Super::BeginPlay();
@@ -114,7 +173,13 @@ void AGridGameMode::BeginPlay()
     RigComponent->InitializeGrid(4, 3); // Rig 사이즈 (예: 4x3)
     PocketComponent->InitializeGrid(5, 1); // Pocket 사이즈 (예: 가로 5, 세로 1)
     StashComponent->InitializeGrid(10, 10); // 영구 보관함 프로토타입 사이즈
+    const bool bIsNewStash = StashSaveSlot.IsEmpty() || !UGameplayStatics::DoesSaveGameExist(StashSaveSlot, 0);
     LoadStash();
+    const bool bNeedsStashSeedVersion = bIsNewStash || LoadedInitialQAMagazineSeedVersion < 1;
+    const bool bHasLegacyQAMagazineSeed = StashComponent->GetItemInstance(TEXT("StashMagQA_1")) ||
+        StashComponent->GetItemInstance(TEXT("StashMagQA_2")) ||
+        StashComponent->GetItemInstance(TEXT("StashMagQA_3"));
+    const bool bShouldSeedStash = bNeedsStashSeedVersion && !bHasLegacyQAMagazineSeed;
 
     auto MakeDefaultInstanceID = [this](FName PreferredID)
     {
@@ -127,10 +192,12 @@ void AGridGameMode::BeginPlay()
     DefBackpack->TemplateID = TEXT("DefaultBackpack");
     DefBackpack->ItemName = TEXT("Standard Backpack");
     DefBackpack->Category = EItemCategory::Backpack;
+    DefBackpack->StorageLayoutSpec = TEXT("5x6");
     DefBackpack->BaseSize = FIntPoint(2, 2); // 슬롯 크기 2x2
     DefBackpack->CurrentStack = 1;
     DefBackpack->MaxStack = 1;
     EquipmentComponent->EquipItem(TEXT("Backpack"), DefBackpack);
+    ReconfigureStorageForEquipmentSlot(TEXT("Backpack"), DefBackpack);
 
     // 기본 안전 금고 장착 (2x2)
     UItemInstance* DefSafeBox = NewObject<UItemInstance>(this);
@@ -148,10 +215,12 @@ void AGridGameMode::BeginPlay()
     DefRig->TemplateID = TEXT("DefaultRig");
     DefRig->ItemName = TEXT("Standard Chest Rig");
     DefRig->Category = EItemCategory::Rig;
+    DefRig->StorageLayoutSpec = TEXT("4x3");
     DefRig->BaseSize = FIntPoint(2, 2); // 슬롯 모양 (예: 2x2)
     DefRig->CurrentStack = 1;
     DefRig->MaxStack = 1;
     EquipmentComponent->EquipItem(TEXT("Rig"), DefRig);
+    ReconfigureStorageForEquipmentSlot(TEXT("Rig"), DefRig);
 
     auto CreateTestItem = [&](FName ID, FName TempID) -> UItemInstance* {
         if (!ItemDataTable) return nullptr;
@@ -168,14 +237,64 @@ void AGridGameMode::BeginPlay()
 
     if (UItemInstance* Rifle = CreateTestItem(TEXT("TestRifle"), TEXT("M4A1")))
         InventoryComponent->AddItem(Rifle, 0, 0);
-    if (UItemInstance* Ammo = CreateTestItem(TEXT("TestAmmo"), TEXT("Ammo_556_M995")))
-        InventoryComponent->AddItem(Ammo, 0, 2);
-    if (UItemInstance* Mag = CreateTestItem(TEXT("TestMag"), TEXT("Mag_M4")))
-        InventoryComponent->AddItem(Mag, 1, 2);
+    UItemInstance* InitialAmmo = CreateTestItem(TEXT("TestAmmo"), TEXT("Ammo_556_M995"));
+    if (InitialAmmo)
+    {
+        InitialAmmo->CurrentStack = FMath::Min(60, InitialAmmo->MaxStack);
+        InventoryComponent->AddItem(InitialAmmo, 0, 2);
+    }
+    UItemInstance* InitialMagazine = CreateTestItem(TEXT("TestMag"), TEXT("Mag_M4"));
+    if (InitialMagazine)
+    {
+        InitialMagazine->CurrentAmmo = InitialMagazine->MaxAmmo;
+        InventoryComponent->AddItem(InitialMagazine, 1, 2);
+    }
     if (UItemInstance* Scope = CreateTestItem(TEXT("TestScope"), TEXT("Scope_ACOG")))
         InventoryComponent->AddItem(Scope, 2, 2);
     if (UItemInstance* Silencer = CreateTestItem(TEXT("TestSilencer"), TEXT("Muzzle_556")))
         InventoryComponent->AddItem(Silencer, 2, 3);
+
+    if (InitialMagazine)
+    {
+        for (int32 MagazineIndex = 0; MagazineIndex < 2; ++MagazineIndex)
+        {
+            const FName InstanceID(*FString::Printf(TEXT("TestMagQA_%d"), MagazineIndex + 1));
+            if (UItemInstance* Magazine = CreateTestItem(InstanceID, InitialMagazine->TemplateID))
+            {
+                Magazine->CurrentAmmo = Magazine->MaxAmmo;
+                int32 InventoryX = 0;
+                int32 InventoryY = 0;
+                if (InventoryComponent->FindEmptySpace(Magazine->GetCurrentSize().X, Magazine->GetCurrentSize().Y, InventoryX, InventoryY))
+                {
+                    InventoryComponent->AddItem(Magazine, InventoryX, InventoryY);
+                }
+            }
+        }
+
+        if (bShouldSeedStash)
+        {
+            for (int32 MagazineIndex = 0; MagazineIndex < 3; ++MagazineIndex)
+            {
+                const FName InstanceID(*FString::Printf(TEXT("StashMagQA_%d"), MagazineIndex + 1));
+                if (UItemInstance* Magazine = CreateTestItem(InstanceID, InitialMagazine->TemplateID))
+                {
+                    Magazine->CurrentAmmo = Magazine->MaxAmmo;
+                    int32 StashX = 0;
+                    int32 StashY = 0;
+                    if (StashComponent->FindEmptySpace(Magazine->GetCurrentSize().X, Magazine->GetCurrentSize().Y, StashX, StashY))
+                    {
+                        StashComponent->AddItem(Magazine, StashX, StashY);
+                    }
+                }
+            }
+        }
+
+        if (bNeedsStashSeedVersion)
+        {
+            LoadedInitialQAMagazineSeedVersion = 1;
+            SaveStash();
+        }
+    }
 
     CurrentScore = 0;
     RemainingTime = TotalTimeLimit; // 60초 게임
@@ -237,11 +356,252 @@ void AGridGameMode::HandlePlayerMoved(FIntPoint NewCoordinate)
     {
         PreviousPlayerCoord = CurrentPlayerCoord;
         CurrentPlayerCoord = NewCoordinate;
+        InvalidateContainerSearchIfPlayerLeftTile();
+        InvalidateCorpseSearchIfPlayerLeftTile();
         if (EnemyManagerComponent)
         {
             EnemyManagerComponent->TryStartEnemyAmbushAtCurrentPlayer();
         }
     }
+}
+
+void AGridGameMode::RefreshEnemyWorldUI()
+{
+    if (MainUI)
+    {
+        MainUI->RefreshEnemyMarkers();
+        MainUI->UpdateActionAvailability();
+    }
+    OnGameStateChanged.Broadcast();
+}
+
+bool AGridGameMode::HasDeadBodyAtCurrentPlayerCoord() const
+{
+    FName InstanceID = NAME_None;
+    return FindSearchableDeadBodyAt(CurrentPlayerCoord, InstanceID);
+}
+
+bool AGridGameMode::FindSearchableDeadBodyAt(FIntPoint Coordinate, FName& OutInstanceID) const
+{
+    OutInstanceID = NAME_None;
+    if (!EnemyManagerComponent) return false;
+
+    for (const FEnemyWorldInstance& Enemy : EnemyManagerComponent->GetEnemyInstances())
+    {
+        if (Enemy.bAlive || Enemy.WorldState != EEnemyWorldState::Dead || Enemy.Coordinate != Coordinate) continue;
+        const UGridInventoryComponent* const* Loot = CorpseLootInventories.Find(Enemy.InstanceID);
+        if (Loot && (!*Loot || (*Loot)->ItemInstances.Num() == 0)) continue;
+        if (OutInstanceID.IsNone() || Enemy.InstanceID.ToString() < OutInstanceID.ToString())
+        {
+            OutInstanceID = Enemy.InstanceID;
+        }
+    }
+    return !OutInstanceID.IsNone();
+}
+
+const TMap<FName, UGridInventoryComponent*>& AGridGameMode::GetCorpseLootInventories() const
+{
+    return CorpseLootInventories;
+}
+
+bool AGridGameMode::FindCorpseLootInventory(FName ItemID, UGridInventoryComponent*& OutInventory) const
+{
+    OutInventory = nullptr;
+    for (const TPair<FName, UGridInventoryComponent*>& Pair : CorpseLootInventories)
+    {
+        if (Pair.Value && Pair.Value->GetItemInstance(ItemID))
+        {
+            OutInventory = Pair.Value;
+            return true;
+        }
+    }
+    return false;
+}
+
+int32 AGridGameMode::GetCorpseLootGenerationCount(FName EnemyInstanceID) const
+{
+    return CorpseLootGenerationCounts.FindRef(EnemyInstanceID);
+}
+
+void AGridGameMode::ClearCorpseLoot()
+{
+    CorpseLootInventories.Empty();
+    CorpseLootGenerationCounts.Empty();
+    ActiveCorpseInstanceID = NAME_None;
+    ActiveCorpseSearchCoord = FIntPoint::ZeroValue;
+    if (MainUI) MainUI->ClearCorpseLootView();
+}
+
+bool AGridGameMode::EnsureCorpseLootGenerated(FName EnemyInstanceID)
+{
+    if (EnemyInstanceID.IsNone()) return false;
+    if (CorpseLootInventories.Contains(EnemyInstanceID)) return true;
+
+    UGridInventoryComponent* CorpseInventory = NewObject<UGridInventoryComponent>(this);
+    if (!CorpseInventory) return false;
+    CorpseInventory->InitializeGrid(6, 6);
+    CorpseLootInventories.Add(EnemyInstanceID, CorpseInventory);
+    CorpseLootGenerationCounts.Add(EnemyInstanceID, 1);
+
+    if (!ItemDataTable) return true;
+    TArray<FItemData*> AllItems;
+    ItemDataTable->GetAllRows<FItemData>(TEXT("CorpseLoot"), AllItems);
+    int32 TotalWeight = 0;
+    for (FItemData* ItemData : AllItems)
+    {
+        if (ItemData && ItemData->DropWeight > 0) TotalWeight += ItemData->DropWeight;
+    }
+    if (TotalWeight <= 0) return true;
+
+    for (int32 Index = 0; Index < 5; ++Index)
+    {
+        int32 Roll = FMath::RandRange(1, TotalWeight);
+        FItemData* Selected = nullptr;
+        for (FItemData* ItemData : AllItems)
+        {
+            if (ItemData && ItemData->DropWeight > 0 && (Roll -= ItemData->DropWeight) <= 0)
+            {
+                Selected = ItemData;
+                break;
+            }
+        }
+        if (!Selected) continue;
+        UItemInstance* Item = NewObject<UItemInstance>(CorpseInventory);
+        Item->InstanceID = FName(*FString::Printf(TEXT("Corpse_%s_%d"), *EnemyInstanceID.ToString(), Index));
+        Item->InitFromData(*Selected);
+        Item->bIsExamined = false;
+        int32 X = INDEX_NONE;
+        int32 Y = INDEX_NONE;
+        if (CorpseInventory->FindEmptySpace(Item->GetCurrentSize().X, Item->GetCurrentSize().Y, X, Y))
+        {
+            CorpseInventory->AddItem(Item, X, Y);
+        }
+    }
+    return true;
+}
+
+void AGridGameMode::BindLootInventoryToUI(UGridInventoryComponent* Inventory)
+{
+    if (MainUI) MainUI->SetLootInventory(Inventory);
+}
+
+bool AGridGameMode::RequestSearchDeadBody()
+{
+    if (RaidState != ERaidState::InRaid || !EnemyManagerComponent ||
+        (CombatComponent && CombatComponent->bHasActiveEnemy) || PlayerPosture == EPlayerRaidPosture::Ambushing ||
+        EnemyManagerComponent->HasActiveAmbushReaction())
+    {
+        return false;
+    }
+
+    if (UWorld* World = GetWorld())
+    {
+        if (World->GetTimerManager().IsTimerActive(SearchPhaseTimer) ||
+            World->GetTimerManager().IsTimerActive(ExamineTimer) || ItemsToExamine.Num() > 0)
+        {
+            return false;
+        }
+    }
+
+    FName InstanceID = NAME_None;
+    if (!FindSearchableDeadBodyAt(CurrentPlayerCoord, InstanceID) ||
+        !EnsureCorpseLootGenerated(InstanceID))
+    {
+        return false;
+    }
+    ActiveCorpseInstanceID = InstanceID;
+    ActiveCorpseSearchCoord = CurrentPlayerCoord;
+    if (UGridInventoryComponent* const* Inventory = CorpseLootInventories.Find(InstanceID))
+    {
+        ActiveExamineInventory = *Inventory;
+        ItemsToExamine.Empty();
+        for (const TPair<FName, UItemInstance*>& Pair : (*Inventory)->ItemInstances)
+        {
+            if (Pair.Value && !Pair.Value->bIsExamined) ItemsToExamine.Add(Pair.Key);
+        }
+        ItemsToExamine.Sort([Inventory](const FName& A, const FName& B)
+        {
+            int32 ASection = INDEX_NONE, AX = INDEX_NONE, AY = INDEX_NONE;
+            int32 BSection = INDEX_NONE, BX = INDEX_NONE, BY = INDEX_NONE;
+            (*Inventory)->FindItemPlacement(A, ASection, AX, AY);
+            (*Inventory)->FindItemPlacement(B, BSection, BX, BY);
+            if (ASection != BSection) return ASection < BSection;
+            if (AY != BY) return AY < BY;
+            if (AX != BX) return AX < BX;
+            return A.ToString() < B.ToString();
+        });
+        if (ItemsToExamine.Num() > 0)
+        {
+            if (UWorld* World = GetWorld())
+            {
+                World->GetTimerManager().SetTimer(ExamineTimer, this, &AGridGameMode::ProcessNextExamine, 0.5f, true);
+            }
+        }
+        BindLootInventoryToUI(*Inventory);
+    }
+    if (MainUI) MainUI->QueueEventNotification(TEXT("시체를 수색 중입니다."));
+    return true;
+}
+
+void AGridGameMode::InvalidateCorpseSearchIfPlayerLeftTile()
+{
+    if (ActiveCorpseInstanceID.IsNone() || CurrentPlayerCoord == ActiveCorpseSearchCoord) return;
+    if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(ExamineTimer);
+    ItemsToExamine.Empty();
+    ActiveExamineInventory = nullptr;
+    ActiveCorpseInstanceID = NAME_None;
+    ActiveCorpseSearchCoord = FIntPoint::ZeroValue;
+    if (MainUI) MainUI->ClearCorpseLootView();
+}
+
+bool AGridGameMode::MovePlayerDuringCombat(FIntPoint NewCoordinate)
+{
+    if (RaidState != ERaidState::InRaid || !CombatComponent || !CombatComponent->bHasActiveEnemy ||
+        !MapManagerComponent || !MapManagerComponent->CanMoveBetween(CurrentPlayerCoord, NewCoordinate) ||
+        !EnemyManagerComponent)
+    {
+        return false;
+    }
+
+    PreviousPlayerCoord = CurrentPlayerCoord;
+    CurrentPlayerCoord = NewCoordinate;
+    InvalidateContainerSearchIfPlayerLeftTile();
+    InvalidateCorpseSearchIfPlayerLeftTile();
+    if (MainUI)
+    {
+        if (MainUI->MinimapUI) MainUI->MinimapUI->SetPlayerCoordinateForCombat(NewCoordinate);
+        if (MainUI->CompactMinimapUI) MainUI->CompactMinimapUI->SetPlayerCoordinateForCombat(NewCoordinate);
+    }
+    OnGameStateChanged.Broadcast();
+    return true;
+}
+
+bool AGridGameMode::RequestPlayerCardinalMove(FIntPoint Delta)
+{
+    if (RaidState != ERaidState::InRaid || !CombatComponent || CombatComponent->bHasActiveEnemy ||
+        PlayerPosture == EPlayerRaidPosture::Ambushing ||
+        (EnemyManagerComponent && EnemyManagerComponent->HasActiveAmbushReaction()) ||
+        (Delta.X != 0 && Delta.Y != 0) || FMath::Abs(Delta.X) + FMath::Abs(Delta.Y) != 1 ||
+        !MapManagerComponent)
+    {
+        return false;
+    }
+
+    const FIntPoint CandidateCoord = CurrentPlayerCoord + Delta;
+    if (!MapManagerComponent->CanMoveBetween(CurrentPlayerCoord, CandidateCoord)) return false;
+
+    PreviousPlayerCoord = CurrentPlayerCoord;
+    CurrentPlayerCoord = CandidateCoord;
+    InvalidateContainerSearchIfPlayerLeftTile();
+    InvalidateCorpseSearchIfPlayerLeftTile();
+    if (MainUI)
+    {
+        if (MainUI->MinimapUI) MainUI->MinimapUI->SetPlayerCoordinateForCombat(CurrentPlayerCoord);
+        if (MainUI->CompactMinimapUI) MainUI->CompactMinimapUI->SetPlayerCoordinateForCombat(CurrentPlayerCoord);
+    }
+    OnGameStateChanged.Broadcast();
+    AdvanceRaidWorldTick();
+    return true;
 }
 
 void AGridGameMode::AdvanceRaidWorldTick()
@@ -285,6 +645,8 @@ bool AGridGameMode::TryRestorePreviousPlayerCoord()
     }
 
     CurrentPlayerCoord = PreviousPlayerCoord;
+    InvalidateContainerSearchIfPlayerLeftTile();
+    InvalidateCorpseSearchIfPlayerLeftTile();
     return true;
 }
 
@@ -381,6 +743,10 @@ void AGridGameMode::StartContainerSearch()
 
     if (!MainUI) return;
 
+    ActiveCorpseInstanceID = NAME_None;
+    ActiveCorpseSearchCoord = FIntPoint::ZeroValue;
+    MainUI->SetLootInventory(LootContainerComponent);
+
     if (PlayerPosture == EPlayerRaidPosture::Ambushing ||
         (EnemyManagerComponent && EnemyManagerComponent->HasActiveAmbushReaction()))
     {
@@ -412,6 +778,9 @@ void AGridGameMode::StartContainerSearch()
     World->GetTimerManager().ClearTimer(SearchPhaseTimer);
     World->GetTimerManager().ClearTimer(ExamineTimer);
     ItemsToExamine.Empty();
+    ActiveExamineInventory = nullptr;
+    ActiveContainerSearchCoord = CurrentPlayerCoord;
+    bHasActiveContainerSearch = true;
 
     // 기존 템 지우기
     LootContainerComponent->ClearInventory();
@@ -420,6 +789,22 @@ void AGridGameMode::StartContainerSearch()
 
     // 1초 후 OnSearchPhaseComplete 호출
     World->GetTimerManager().SetTimer(SearchPhaseTimer, this, &AGridGameMode::OnSearchPhaseComplete, 1.0f, false);
+}
+
+void AGridGameMode::InvalidateContainerSearchIfPlayerLeftTile()
+{
+    if (!bHasActiveContainerSearch || CurrentPlayerCoord == ActiveContainerSearchCoord) return;
+
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(SearchPhaseTimer);
+        World->GetTimerManager().ClearTimer(ExamineTimer);
+    }
+    ItemsToExamine.Empty();
+    ActiveExamineInventory = nullptr;
+    if (LootContainerComponent) LootContainerComponent->ClearInventory();
+    bHasActiveContainerSearch = false;
+    ActiveContainerSearchCoord = FIntPoint::ZeroValue;
 }
 
 void AGridGameMode::OnSearchPhaseComplete()
@@ -432,6 +817,7 @@ void AGridGameMode::OnSearchPhaseComplete()
     {
         ItemsToExamine.Empty();
         World->GetTimerManager().ClearTimer(ExamineTimer);
+        ActiveExamineInventory = nullptr;
         return;
     }
 
@@ -439,6 +825,7 @@ void AGridGameMode::OnSearchPhaseComplete()
     {
         ItemsToExamine.Empty();
         World->GetTimerManager().ClearTimer(ExamineTimer);
+        ActiveExamineInventory = nullptr;
         return;
     }
 
@@ -481,6 +868,8 @@ void AGridGameMode::OnSearchPhaseComplete()
         MainUI->QueueEventNotification(TEXT("탐색 가능한 아이템이 없습니다."));
         return;
     }
+
+    ActiveExamineInventory = LootContainerComponent;
 
     static int32 SpawnCounter = 0;
 
@@ -544,19 +933,20 @@ void AGridGameMode::OnSearchPhaseComplete()
 void AGridGameMode::ProcessNextExamine()
 {
     UWorld* World = GetWorld();
-    if (!World) return;
 
     if (RaidState != ERaidState::InRaid ||
         (CombatComponent && CombatComponent->bHasActiveEnemy))
     {
         ItemsToExamine.Empty();
-        World->GetTimerManager().ClearTimer(ExamineTimer);
+        if (World) World->GetTimerManager().ClearTimer(ExamineTimer);
+        ActiveExamineInventory = nullptr;
         return;
     }
 
     if (ItemsToExamine.Num() == 0)
     {
-        World->GetTimerManager().ClearTimer(ExamineTimer);
+        if (World) World->GetTimerManager().ClearTimer(ExamineTimer);
+        ActiveExamineInventory = nullptr;
         return;
     }
 
@@ -564,16 +954,22 @@ void AGridGameMode::ProcessNextExamine()
     FName TargetItem = ItemsToExamine[0];
     ItemsToExamine.RemoveAt(0);
 
-    if (LootContainerComponent)
+    if (ActiveExamineInventory)
     {
         // 인스턴스의 식별 상태를 true로 변경
-        if (UItemInstance* ItemObj = LootContainerComponent->GetItemInstance(TargetItem))
+        if (UItemInstance* ItemObj = ActiveExamineInventory->GetItemInstance(TargetItem))
         {
             ItemObj->bIsExamined = true;
             ItemObj->OnItemModified.Broadcast();
             // UI 갱신
-            LootContainerComponent->OnInventoryChanged.Broadcast();
+            ActiveExamineInventory->OnInventoryChanged.Broadcast();
         }
+    }
+
+    if (ItemsToExamine.Num() == 0)
+    {
+        if (World) World->GetTimerManager().ClearTimer(ExamineTimer);
+        ActiveExamineInventory = nullptr;
     }
 }
 
@@ -619,6 +1015,30 @@ void AGridGameMode::GameTimerUpdateForTest()
 void AGridGameMode::SearchPhaseCompleteForTest()
 {
     OnSearchPhaseComplete();
+}
+
+int32 AGridGameMode::GetPendingExamineCountForTest() const
+{
+    return ItemsToExamine.Num();
+}
+
+void AGridGameMode::ProcessNextExamineForTest()
+{
+    ProcessNextExamine();
+}
+
+bool AGridGameMode::SeedCorpseLootForTest(FName EnemyInstanceID, const FItemData& ItemData)
+{
+    if (!EnsureCorpseLootGenerated(EnemyInstanceID)) return false;
+    UGridInventoryComponent* const* Inventory = CorpseLootInventories.Find(EnemyInstanceID);
+    if (!Inventory || !*Inventory) return false;
+    UItemInstance* Item = NewObject<UItemInstance>(*Inventory);
+    Item->InstanceID = FName(*FString::Printf(TEXT("TestCorpse_%s"), *EnemyInstanceID.ToString()));
+    Item->InitFromData(ItemData);
+    int32 X = INDEX_NONE;
+    int32 Y = INDEX_NONE;
+    return (*Inventory)->FindEmptySpace(Item->GetCurrentSize().X, Item->GetCurrentSize().Y, X, Y) &&
+        (*Inventory)->AddItem(Item, X, Y);
 }
 #endif
 
@@ -666,12 +1086,15 @@ bool AGridGameMode::StartRaid()
         CombatComponent->LastCombatMessage.Empty();
     }
     if (EnemyManagerComponent) EnemyManagerComponent->ResetForRaid();
+    ClearCorpseLoot();
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().ClearTimer(SearchPhaseTimer);
         World->GetTimerManager().ClearTimer(ExamineTimer);
     }
     ItemsToExamine.Empty();
+    bHasActiveContainerSearch = false;
+    ActiveContainerSearchCoord = FIntPoint::ZeroValue;
 
     CurrentScore = 0;
     RemainingTime = TotalTimeLimit;
@@ -735,6 +1158,7 @@ bool AGridGameMode::SaveStash()
 
     SaveGame->GridWidth = StashComponent->GridWidth;
     SaveGame->GridHeight = StashComponent->GridHeight;
+    SaveGame->InitialQAMagazineSeedVersion = LoadedInitialQAMagazineSeedVersion;
     TSet<FName> SavedInstanceIDs;
 
     for (const TPair<FName, UItemInstance*>& Pair : StashComponent->ItemInstances)
@@ -936,6 +1360,8 @@ bool AGridGameMode::LoadStash()
 
     if (!bAllItemsLoaded) return false;
 
+    LoadedInitialQAMagazineSeedVersion = SaveGame->InitialQAMagazineSeedVersion;
+
     StashComponent->GridWidth = LoadedStash->GridWidth;
     StashComponent->GridHeight = LoadedStash->GridHeight;
     StashComponent->GridCells = MoveTemp(LoadedStash->GridCells);
@@ -981,6 +1407,7 @@ bool AGridGameMode::ExtractRaid()
     if (LootContainerComponent) LootContainerComponent->ClearInventory();
     if (CombatComponent) CombatComponent->ClearEnemy();
     if (EnemyManagerComponent) EnemyManagerComponent->ResetForRaid();
+    ClearCorpseLoot();
     if (MainUI && MainUI->MinimapUI) MainUI->MinimapUI->ResetMovement();
 
     if (UWorld* World = GetWorld())
@@ -990,6 +1417,8 @@ bool AGridGameMode::ExtractRaid()
         World->GetTimerManager().ClearTimer(ExamineTimer);
     }
     ItemsToExamine.Empty();
+    bHasActiveContainerSearch = false;
+    ActiveContainerSearchCoord = FIntPoint::ZeroValue;
     SetRaidState(ERaidState::Lobby);
     if (MainUI)
     {
@@ -1032,6 +1461,7 @@ void AGridGameMode::FailRaid()
     }
     if (CombatComponent) CombatComponent->ClearEnemy();
     if (EnemyManagerComponent) EnemyManagerComponent->ResetForRaid();
+    ClearCorpseLoot();
     if (MainUI && MainUI->MinimapUI) MainUI->MinimapUI->ResetMovement();
 
     if (UWorld* World = GetWorld())
@@ -1041,6 +1471,8 @@ void AGridGameMode::FailRaid()
         World->GetTimerManager().ClearTimer(ExamineTimer);
     }
     ItemsToExamine.Empty();
+    bHasActiveContainerSearch = false;
+    ActiveContainerSearchCoord = FIntPoint::ZeroValue;
     // 실패 결과를 표시한 뒤 다음 출격을 준비할 수 있도록 로비로 복귀합니다.
     SetRaidState(ERaidState::Lobby);
     if (MainUI) MainUI->ShowGameResult(false);

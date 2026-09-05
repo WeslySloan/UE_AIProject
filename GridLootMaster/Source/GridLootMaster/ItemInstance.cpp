@@ -14,6 +14,7 @@ UItemInstance::UItemInstance()
     ItemIcon = nullptr;
     CachedDynamicIcon = nullptr;
     BaseSize = FIntPoint(1, 1);
+    StorageLayoutSpec.Empty();
     bIsRotated = false;
     bIsExamined = true;
     CurrentStack = 1;
@@ -84,6 +85,7 @@ void UItemInstance::InitFromData(const FItemData& InData)
     CachedDynamicIcon = nullptr;
     Rarity = InData.Rarity;
     BaseSize = FIntPoint(FMath::Max(1, InData.Size.X), FMath::Max(1, InData.Size.Y));
+    StorageLayoutSpec = InData.StorageLayoutSpec;
     bIsRotated = false;
     bIsExamined = true;
     MaxStack = FMath::Max(1, InData.MaxStack);
