@@ -1035,6 +1035,7 @@ bool AGridGameMode::SeedCorpseLootForTest(FName EnemyInstanceID, const FItemData
     UItemInstance* Item = NewObject<UItemInstance>(*Inventory);
     Item->InstanceID = FName(*FString::Printf(TEXT("TestCorpse_%s"), *EnemyInstanceID.ToString()));
     Item->InitFromData(ItemData);
+    Item->bIsExamined = false;
     int32 X = INDEX_NONE;
     int32 Y = INDEX_NONE;
     return (*Inventory)->FindEmptySpace(Item->GetCurrentSize().X, Item->GetCurrentSize().Y, X, Y) &&

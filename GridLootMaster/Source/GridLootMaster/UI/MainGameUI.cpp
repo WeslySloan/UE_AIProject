@@ -690,7 +690,7 @@ void UMainGameUI::RestoreRaidInputFocus()
 {
     bRaidFocusRestorePending = false;
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
-    if (!GM || GM->RaidState != ERaidState::InRaid || HasAnyUserFocus()) return;
+    if (!GM || GM->RaidState != ERaidState::InRaid || HasRaidUIFocus()) return;
 
     APlayerController* PC = GetOwningPlayer();
     if (!PC) return;
@@ -701,6 +701,12 @@ void UMainGameUI::RestoreRaidInputFocus()
     PC->SetInputMode(InputMode);
     SetKeyboardFocus();
     SetUserFocus(PC);
+}
+
+bool UMainGameUI::HasRaidUIFocus() const
+{
+    APlayerController* PC = GetOwningPlayer();
+    return PC && (HasUserFocus(PC) || HasUserFocusedDescendants(PC));
 }
 
 void UMainGameUI::ScheduleRaidInputFocusRestore()
@@ -865,7 +871,7 @@ void UMainGameUI::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
     Super::NativeTick(MyGeometry, InDeltaTime);
     if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
     {
-        if (GM->RaidState == ERaidState::InRaid && !HasAnyUserFocus())
+        if (GM->RaidState == ERaidState::InRaid && !HasRaidUIFocus())
         {
             ScheduleRaidInputFocusRestore();
         }

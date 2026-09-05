@@ -110,6 +110,7 @@ public:
     UFUNCTION()
     void RestoreRaidInputFocus();
 
+    bool HasRaidUIFocus() const;
     void ScheduleRaidInputFocusRestore();
 
     UFUNCTION()
