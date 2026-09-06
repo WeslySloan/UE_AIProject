@@ -31,6 +31,7 @@ class UItemDataTable;
 class UMapManagerComponent;
 class UCombatComponent;
 class UEnemyManagerComponent;
+class USoundBase;
 
 UCLASS()
 class GRIDLOOTMASTER_API AGridGameMode : public AGameModeBase
@@ -139,6 +140,8 @@ public:
     void FailRaid();
 
     void AdvanceRaidWorldTick();
+
+    void PlaySoundEffect(FName SoundID);
 
 #if WITH_DEV_AUTOMATION_TESTS
     bool bHasForcedRaidStartPointForTest = false;
@@ -284,4 +287,9 @@ protected:
 
     UFUNCTION()
     void ProcessNextExamine(); // 0.5초마다 아이템 1개씩 식별 완료 처리
+
+    UPROPERTY()
+    TMap<FName, TObjectPtr<USoundBase>> CachedSounds;
+
+    void InitializeSoundAssets();
 };

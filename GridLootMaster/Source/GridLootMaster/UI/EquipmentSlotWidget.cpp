@@ -501,6 +501,7 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
     }
 
     SetEquippedItem(ItemDropOp->ItemObj);
+    GM->PlaySoundEffect(TEXT("UI_ItemPickup"));
     
     return true;
 }

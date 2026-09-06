@@ -445,6 +445,11 @@ bool UGridBoardWidget::NativeOnDrop(const FGeometry& InGeometry, const FDragDrop
                 // 새 위치에 아이템 추가
                 if (bMoved)
                 {
+                    if (GM && (ItemDropOp->SourceInventory != InventoryComponent ||
+                        ItemDropOp->SourceEquipmentSlot != NAME_None))
+                    {
+                        GM->PlaySoundEffect(TEXT("UI_ItemPickup"));
+                    }
                     if (ItemDropOp->OriginalWidget)
                     {
                         ItemDropOp->OriginalWidget->RemoveFromParent();

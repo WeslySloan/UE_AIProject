@@ -43,6 +43,10 @@ void UCombatComponent::SpawnEnemy(const FEnemyDefinition& EnemyDefinition, bool 
     bLastPlayerAttackHit = false;
     bPlayerHasInitiative = bGrantPlayerInitiative;
     LastCombatMessage = FString::Printf(TEXT("적이 나타났다!! %s"), *CurrentEnemy.Definition.DisplayName);
+    if (AGridGameMode* GM = Cast<AGridGameMode>(GetOwner()))
+    {
+        GM->PlaySoundEffect(TEXT("Combat_Start"));
+    }
     OnCombatStateChanged.Broadcast();
 }
 
@@ -71,7 +75,13 @@ bool UCombatComponent::AttackEnemy(int32 DamageAmount)
             {
                 GM->EnemyManagerComponent->SyncCombatContact();
             }
+            GM->PlaySoundEffect(TEXT("Enemy_Death"));
         }
+    }
+
+    if (AGridGameMode* GM = Cast<AGridGameMode>(GetOwner()))
+    {
+        GM->PlaySoundEffect(TEXT("Combat_Hit"));
     }
 
     OnCombatStateChanged.Broadcast();
@@ -146,6 +156,20 @@ bool UCombatComponent::RequestPlayerAttack(int32 DamageAmount, int32 AccuracyOve
     }
     PlayerAttackCooldownRemaining = FMath::Max(0.1f, AttackInterval);
     bLastPlayerAttackHit = false;
+
+    if (AGridGameMode* GM = Cast<AGridGameMode>(GetOwner()))
+    {
+        const UItemInstance* Weapon = GM->EquipmentComponent
+            ? GM->EquipmentComponent->GetEquippedItem(ActiveWeaponSlot) : nullptr;
+        const FName WeaponID = Weapon ? Weapon->TemplateID : NAME_None;
+        FName SoundID = NAME_None;
+        if (WeaponID == TEXT("Glock19")) SoundID = TEXT("Weapon_Glock19");
+        else if (WeaponID == TEXT("MP5")) SoundID = TEXT("Weapon_MP5");
+        else if (WeaponID == TEXT("AK74M")) SoundID = TEXT("Weapon_AK74M");
+        else if (WeaponID == TEXT("M4A1")) SoundID = TEXT("Weapon_M4A1");
+        else if (WeaponID == TEXT("Mosin")) SoundID = TEXT("Weapon_Mosin");
+        if (!SoundID.IsNone()) GM->PlaySoundEffect(SoundID);
+    }
 
     const int32 EffectiveAccuracyPercent = FMath::Clamp(
         FMath::RoundToInt(static_cast<float>(AccuracyPercent - DistancePenalty) - CurrentRecoil), 0, 100);
@@ -321,6 +345,7 @@ bool UCombatComponent::RequestReload(FName WeaponSlot)
     PendingReloadGridCoord = BestCandidate.GridCoord;
     PlayerActionState = ECombatPlayerActionState::Reloading;
     PlayerActionTimeRemaining = FMath::Max(0.0f, Weapon->ReloadTimeSeconds);
+    GM->PlaySoundEffect(TEXT("Weapon_Reload"));
     LastCombatMessage = PlayerActionTimeRemaining > KINDA_SMALL_NUMBER
         ? FString::Printf(TEXT("재장전 중... %.1f초"), PlayerActionTimeRemaining)
         : TEXT("재장전 중...");

@@ -12,6 +12,7 @@
 #include "StashSaveGame.h"
 #include "CombatComponent.h"
 #include "EnemyManagerComponent.h"
+#include "Sound/SoundBase.h"
 
 namespace
 {
@@ -166,6 +167,8 @@ bool AGridGameMode::TryStandaloneStorageUnequip(FName SlotID, UItemInstance* Ite
 void AGridGameMode::BeginPlay()
 {
     Super::BeginPlay();
+
+    InitializeSoundAssets();
 
     InventoryComponent->InitializeGrid(5, 6); // 백팩 사이즈 (가로 5, 세로 6)
     LootContainerComponent->InitializeGrid(6, 6); 
@@ -324,6 +327,54 @@ void AGridGameMode::BeginPlay()
         }
     }
 
+}
+
+void AGridGameMode::InitializeSoundAssets()
+{
+    const TMap<FName, FString> SoundPaths = {
+        {TEXT("UI_Click"), TEXT("/Game/Audio/UI/UI_Click.UI_Click")},
+        {TEXT("UI_Error"), TEXT("/Game/Audio/UI/UI_Error.UI_Error")},
+        {TEXT("UI_ItemPickup"), TEXT("/Game/Audio/UI/UI_ItemPickup.UI_ItemPickup")},
+        {TEXT("UI_ExamineComplete"), TEXT("/Game/Audio/UI/UI_ExamineComplete.UI_ExamineComplete")},
+        {TEXT("UI_SearchComplete"), TEXT("/Game/Audio/UI/UI_SearchComplete.UI_SearchComplete")},
+        {TEXT("Weapon_Glock19"), TEXT("/Game/Audio/Combat/Weapon_Glock19.Weapon_Glock19")},
+        {TEXT("Weapon_MP5"), TEXT("/Game/Audio/Combat/Weapon_MP5.Weapon_MP5")},
+        {TEXT("Weapon_AK74M"), TEXT("/Game/Audio/Combat/Weapon_AK74M.Weapon_AK74M")},
+        {TEXT("Weapon_M4A1"), TEXT("/Game/Audio/Combat/Weapon_M4A1.Weapon_M4A1")},
+        {TEXT("Weapon_Mosin"), TEXT("/Game/Audio/Combat/Weapon_Mosin.Weapon_Mosin")},
+        {TEXT("Weapon_Reload"), TEXT("/Game/Audio/Combat/Weapon_Reload.Weapon_Reload")},
+        {TEXT("Combat_Hit"), TEXT("/Game/Audio/Combat/Combat_Hit.Combat_Hit")},
+        {TEXT("Enemy_Death"), TEXT("/Game/Audio/Combat/Enemy_Death.Enemy_Death")},
+        {TEXT("Combat_Start"), TEXT("/Game/Audio/Raid/Combat_Start.Combat_Start")},
+        {TEXT("Extraction_Success"), TEXT("/Game/Audio/Raid/Extraction_Success.Extraction_Success")},
+        {TEXT("Raid_Fail"), TEXT("/Game/Audio/Raid/Raid_Fail.Raid_Fail")},
+        {TEXT("Retirement_Ending"), TEXT("/Game/Audio/Raid/Retirement_Ending.Retirement_Ending")}
+    };
+
+    for (const TPair<FName, FString>& Pair : SoundPaths)
+    {
+        USoundBase* Sound = Cast<USoundBase>(StaticLoadObject(USoundBase::StaticClass(), nullptr, *Pair.Value));
+        if (Sound)
+        {
+            CachedSounds.Add(Pair.Key, Sound);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("Sound asset could not be loaded: %s (%s)"), *Pair.Key.ToString(), *Pair.Value);
+        }
+    }
+}
+
+void AGridGameMode::PlaySoundEffect(FName SoundID)
+{
+    if (TObjectPtr<USoundBase>* Sound = CachedSounds.Find(SoundID))
+    {
+        const float Volume = SoundID.ToString().StartsWith(TEXT("Weapon_")) ||
+            SoundID == TEXT("Combat_Hit") || SoundID == TEXT("Enemy_Death") ? 0.8f :
+            (SoundID == TEXT("Combat_Start") || SoundID == TEXT("Extraction_Success") ||
+             SoundID == TEXT("Raid_Fail") || SoundID == TEXT("Retirement_Ending") ? 0.65f : 0.45f);
+        UGameplayStatics::PlaySound2D(this, Sound->Get(), Volume);
+    }
 }
 
 FName AGridGameMode::MakeUniqueInstanceID(FName PreferredID) const
@@ -819,6 +870,7 @@ void AGridGameMode::StartContainerSearch()
     ActiveExamineInventory = nullptr;
     ActiveContainerSearchCoord = CurrentPlayerCoord;
     bHasActiveContainerSearch = true;
+    PlaySoundEffect(TEXT("UI_Click"));
 
     // 기존 템 지우기
     LootContainerComponent->ClearInventory();
@@ -959,6 +1011,7 @@ void AGridGameMode::OnSearchPhaseComplete()
     // 아이템이 무사히 생성되었으면, 0.5초마다 하나씩 까보는 타이머 시작
     if (ItemsToExamine.Num() > 0)
     {
+        PlaySoundEffect(TEXT("UI_SearchComplete"));
         MainUI->QueueEventNotification(TEXT("탐색 완료. 아이템을 분석 중입니다."));
         World->GetTimerManager().SetTimer(ExamineTimer, this, &AGridGameMode::ProcessNextExamine, 0.5f, true);
     }
@@ -997,7 +1050,11 @@ void AGridGameMode::ProcessNextExamine()
         // 인스턴스의 식별 상태를 true로 변경
         if (UItemInstance* ItemObj = ActiveExamineInventory->GetItemInstance(TargetItem))
         {
-            ItemObj->bIsExamined = true;
+            if (!ItemObj->bIsExamined)
+            {
+                ItemObj->bIsExamined = true;
+                PlaySoundEffect(TEXT("UI_ExamineComplete"));
+            }
             ItemObj->OnItemModified.Broadcast();
             // UI 갱신
             ActiveExamineInventory->OnInventoryChanged.Broadcast();
@@ -1007,6 +1064,10 @@ void AGridGameMode::ProcessNextExamine()
     if (ItemsToExamine.Num() == 0)
     {
         if (World) World->GetTimerManager().ClearTimer(ExamineTimer);
+        if (!ActiveCorpseInstanceID.IsNone())
+        {
+            PlaySoundEffect(TEXT("UI_SearchComplete"));
+        }
         ActiveExamineInventory = nullptr;
     }
 }
@@ -1159,6 +1220,7 @@ bool AGridGameMode::StartRaid()
         MainUI->RefreshMinimaps(MapManagerComponent);
     }
     SetRaidState(ERaidState::InRaid);
+    PlaySoundEffect(TEXT("UI_Click"));
 
     if (MainUI)
     {
@@ -1462,6 +1524,7 @@ bool AGridGameMode::ExtractRaid()
     bHasActiveContainerSearch = false;
     ActiveContainerSearchCoord = FIntPoint::ZeroValue;
     SetRaidState(ERaidState::Lobby);
+    PlaySoundEffect(TEXT("Extraction_Success"));
     if (MainUI)
     {
         MainUI->ShowGameResult(true);
@@ -1483,6 +1546,8 @@ bool AGridGameMode::IsAtExtractionPoint() const
 void AGridGameMode::FailRaid()
 {
     if (RaidState != ERaidState::InRaid) return;
+
+    PlaySoundEffect(TEXT("Raid_Fail"));
 
     if (InventoryComponent) InventoryComponent->ClearInventory();
     if (LootContainerComponent) LootContainerComponent->ClearInventory();

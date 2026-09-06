@@ -37,7 +37,6 @@
 #include "../Map/MapManagerComponent.h"
 #include "../ItemInstance.h"
 #include "Kismet/GameplayStatics.h"
-#include "Sound/SoundBase.h"
 #include "TimerManager.h"
 #include "Engine/Texture2D.h"
 #include "ImageUtils.h"
@@ -951,6 +950,8 @@ void UMainGameUI::OnStashButtonClicked()
     if (!GM || GM->RaidState == ERaidState::InRaid) return;
     if (!GM->SaveStash()) return;
 
+    GM->PlaySoundEffect(TEXT("UI_Click"));
+
     RightPanelSwitcher->SetActiveWidgetIndex(2);
     UpdateActionAvailability();
 }
@@ -966,6 +967,10 @@ void UMainGameUI::OnStartRaidClicked()
             // START RAID button disappears with the lobby/stash panel, so keyboard focus can be lost.
             // Restore focus to the persistent root UI after the panel switch has completed.
             ScheduleRaidInputFocusRestore();
+        }
+        else if (GM->RaidState == ERaidState::Lobby)
+        {
+            GM->PlaySoundEffect(TEXT("UI_Error"));
         }
     }
 }
@@ -1035,7 +1040,7 @@ void UMainGameUI::ScheduleRaidInputFocusRestore()
 void UMainGameUI::OnExtractButtonClicked()
 {
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
-    if (GM) GM->ExtractRaid();
+    if (GM && !GM->ExtractRaid()) GM->PlaySoundEffect(TEXT("UI_Error"));
 }
 
 void UMainGameUI::OnSearchButtonClicked()
@@ -1044,7 +1049,8 @@ void UMainGameUI::OnSearchButtonClicked()
     {
         if (GM->HasDeadBodyAtCurrentPlayerCoord())
         {
-            GM->RequestSearchDeadBody();
+            if (GM->RequestSearchDeadBody()) GM->PlaySoundEffect(TEXT("UI_Click"));
+            else GM->PlaySoundEffect(TEXT("UI_Error"));
         }
         else
         {
@@ -1569,6 +1575,7 @@ void UMainGameUI::OnSellButtonClicked()
             GM->RetirementBalance += TotalValue;
             GM->SaveStash();
             UpdateActionAvailability();
+            GM->PlaySoundEffect(TEXT("UI_Click"));
         }
     }
 }
@@ -1622,6 +1629,7 @@ void UMainGameUI::OnSellAllButtonClicked()
         GM->RetirementBalance += TotalValue;
         GM->SaveStash();
         UpdateActionAvailability();
+        GM->PlaySoundEffect(TEXT("UI_Click"));
     }
 }
 
@@ -1636,11 +1644,16 @@ void UMainGameUI::OnRetirementClicked()
     if (RetirementEndingOverlay)
     {
         RetirementEndingOverlay->SetVisibility(ESlateVisibility::Visible);
+        GM->PlaySoundEffect(TEXT("Retirement_Ending"));
     }
 }
 
 void UMainGameUI::OnRetirementReturnClicked()
 {
+    if (AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this)))
+    {
+        GM->PlaySoundEffect(TEXT("UI_Click"));
+    }
     if (RetirementEndingOverlay)
     {
         RetirementEndingOverlay->SetVisibility(ESlateVisibility::Collapsed);
@@ -1655,12 +1668,14 @@ void UMainGameUI::OnBangButtonClicked()
 
     if (!GM->CombatComponent || !GM->CombatComponent->bHasActiveEnemy)
     {
+        GM->PlaySoundEffect(TEXT("UI_Error"));
         QueueEventNotification(TEXT("공격할 적이 없습니다."));
         return;
     }
 
     if (!GM->EquipmentComponent)
     {
+        GM->PlaySoundEffect(TEXT("UI_Error"));
         QueueEventNotification(TEXT("무기를 준비할 수 없습니다."));
         return;
     }
@@ -1668,12 +1683,14 @@ void UMainGameUI::OnBangButtonClicked()
     UItemInstance* ActiveWeapon = GM->EquipmentComponent->GetEquippedItem(ActiveWeaponSlot);
     if (!ActiveWeapon)
     {
+        GM->PlaySoundEffect(TEXT("UI_Error"));
         QueueEventNotification(TEXT("선택한 무기가 없습니다."));
         return;
     }
 
     if (ActiveWeapon->Damage <= 0)
     {
+        GM->PlaySoundEffect(TEXT("UI_Error"));
         QueueEventNotification(TEXT("이 무기로 공격할 수 없습니다."));
         return;
     }
@@ -1681,12 +1698,14 @@ void UMainGameUI::OnBangButtonClicked()
     const bool bNeedsAmmo = ActiveWeapon->WeaponAttackType == EWeaponAttackType::Firearm;
     if (bNeedsAmmo && !ActiveWeapon->EquippedMagazine)
     {
+        GM->PlaySoundEffect(TEXT("UI_Error"));
         QueueEventNotification(TEXT("탄창이 장착되지 않았습니다."));
         return;
     }
 
     if (bNeedsAmmo && ActiveWeapon->EquippedMagazine->CurrentAmmo <= 0)
     {
+        GM->PlaySoundEffect(TEXT("UI_Error"));
         QueueEventNotification(TEXT("탄약이 없습니다."));
         return;
     }
@@ -1695,6 +1714,7 @@ void UMainGameUI::OnBangButtonClicked()
         ActiveWeapon->BaseAccuracyPercent, ActiveWeapon->AttackIntervalSeconds, ActiveWeapon->MaxRangeTiles,
         ActiveWeapon->RecoilPerShot, ActiveWeapon->RecoilRecoveryPerSecond, ActiveWeapon->OptimalRangeTiles))
     {
+        GM->PlaySoundEffect(TEXT("UI_Error"));
         if (!GM->CombatComponent->LastCombatMessage.IsEmpty())
         {
             QueueEventNotification(GM->CombatComponent->LastCombatMessage);
@@ -1709,26 +1729,6 @@ void UMainGameUI::OnBangButtonClicked()
         ActiveWeapon->OnItemModified.Broadcast();
     }
 
-    // 소음기 장착 여부 확인 (Muzzle 부착물이 있으면 소음기로 간주)
-    bool bIsSilenced = (ActiveWeapon->EquippedMuzzle != nullptr);
-
-    // 사용자가 에디터로 임포트한 에셋 경로 (임포트 전이면 로드 실패함)
-    FString SoundPath = bIsSilenced
-            ? TEXT("/Script/Engine.SoundWave'/Game/Assets/Sounds/Sound_WpnShoot_Silenced.Sound_WpnShoot_Silenced'")
-            : TEXT("/Script/Engine.SoundWave'/Game/Assets/Sounds/Sound_WpnShoot_Normal.Sound_WpnShoot_Normal'");
-
-    USoundBase* ShootSound = Cast<USoundBase>(StaticLoadObject(USoundBase::StaticClass(), nullptr, *SoundPath));
-    if (!ShootSound)
-    {
-        // 에셋 임포트가 안 되어 있을 때의 대체 사운드
-        ShootSound = Cast<USoundBase>(StaticLoadObject(USoundBase::StaticClass(), nullptr, TEXT("/Engine/VREditor/Sounds/UI/Laser_Hover_01.Laser_Hover_01")));
-    }
-
-    if (ShootSound)
-    {
-        UGameplayStatics::PlaySound2D(this, ShootSound);
-    }
-
     // UI 갱신
     if (ActiveWeaponSlot == TEXT("Primary1") && WeaponSlot1) WeaponSlot1->RefreshSlotUI();
     else if (ActiveWeaponSlot == TEXT("Primary2") && WeaponSlot2) WeaponSlot2->RefreshSlotUI();
@@ -1740,6 +1740,7 @@ void UMainGameUI::OnReloadButtonClicked()
     if (GM && GM->CombatComponent && !GM->CombatComponent->RequestReload() &&
         !GM->CombatComponent->LastCombatMessage.IsEmpty())
     {
+        GM->PlaySoundEffect(TEXT("UI_Error"));
         QueueEventNotification(GM->CombatComponent->LastCombatMessage);
     }
 }
