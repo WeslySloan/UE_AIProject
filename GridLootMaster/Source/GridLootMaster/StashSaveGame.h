@@ -93,4 +93,7 @@ public:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stash")
     int32 InitialQAMagazineSeedVersion = 0;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Progression")
+    int64 RetirementBalance = 0;
 };

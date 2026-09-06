@@ -1198,6 +1198,7 @@ bool AGridGameMode::SaveStash()
     SaveGame->GridWidth = StashComponent->GridWidth;
     SaveGame->GridHeight = StashComponent->GridHeight;
     SaveGame->InitialQAMagazineSeedVersion = LoadedInitialQAMagazineSeedVersion;
+    SaveGame->RetirementBalance = RetirementBalance;
     TSet<FName> SavedInstanceIDs;
 
     for (const TPair<FName, UItemInstance*>& Pair : StashComponent->ItemInstances)
@@ -1324,6 +1325,8 @@ bool AGridGameMode::LoadStash()
 
     UStashSaveGame* SaveGame = Cast<UStashSaveGame>(UGameplayStatics::LoadGameFromSlot(StashSaveSlot, 0));
     if (!SaveGame) return false;
+
+    RetirementBalance = SaveGame->RetirementBalance;
 
     constexpr int32 MaxStashGridDimension = 10;
     if (SaveGame->GridWidth < 1 || SaveGame->GridWidth > MaxStashGridDimension ||

@@ -12,6 +12,7 @@ class USectionedStorageWidget;
 class UEquipmentSlotWidget;
 class UScrollBox;
 class UVerticalBox;
+class UProgressBar;
 
 UCLASS()
 class GRIDLOOTMASTER_API UMainGameUI : public UUserWidget
@@ -139,6 +140,18 @@ public:
 
     UPROPERTY()
     UGridBoardWidget* StashBoard;
+
+    UPROPERTY()
+    UVerticalBox* RetirementAccountPanel;
+
+    UPROPERTY()
+    UTextBlock* RetirementBalanceText;
+
+    UPROPERTY()
+    UTextBlock* RetirementStatusText;
+
+    UPROPERTY()
+    UProgressBar* RetirementProgressBar;
 
     UPROPERTY()
     class UButton* ToggleModeButton;

@@ -21,6 +21,7 @@
 #include "Components/ScrollBox.h"
 #include "Components/UniformGridPanel.h"
 #include "Components/UniformGridSlot.h"
+#include "Components/ProgressBar.h"
 #include "MinimapWidget.h"
 #include "GridBoardWidget.h"
 #include "SectionedStorageWidget.h"
@@ -203,10 +204,46 @@ bool UMainGameUI::Initialize()
         StashTitle->SetText(FText::FromString(TEXT("STASH")));
         StashPanel->AddChildToVerticalBox(StashTitle);
 
+        RetirementAccountPanel = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RetirementAccountPanel"));
+        StashPanel->AddChildToVerticalBox(RetirementAccountPanel);
+
+        UTextBlock* RetirementTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        RetirementTitle->SetText(FText::FromString(TEXT("RETIREMENT ACCOUNT")));
+        RetirementAccountPanel->AddChildToVerticalBox(RetirementTitle);
+
+        RetirementBalanceText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("RetirementBalanceText"));
+        RetirementAccountPanel->AddChildToVerticalBox(RetirementBalanceText);
+
+        RetirementStatusText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("RetirementStatusText"));
+        RetirementStatusText->SetText(FText::FromString(TEXT("SALE PROCEEDS AUTO-DEPOSIT")));
+        RetirementAccountPanel->AddChildToVerticalBox(RetirementStatusText);
+
+        RetirementProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("RetirementProgressBar"));
+        RetirementAccountPanel->AddChildToVerticalBox(RetirementProgressBar);
+
         StashBoard = WidgetTree->ConstructWidget<UGridBoardWidget>(UGridBoardWidget::StaticClass(), TEXT("StashBoard"));
         UVerticalBoxSlot* StashBoardSlot = StashPanel->AddChildToVerticalBox(StashBoard);
         StashBoardSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
         StashBoardSlot->SetHorizontalAlignment(HAlign_Left);
+
+        UHorizontalBox* StashSellActions = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("StashSellActions"));
+        StashPanel->AddChildToVerticalBox(StashSellActions);
+
+        SellBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellButton"));
+        UTextBlock* SellBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        SellBtnText->SetText(FText::FromString(TEXT("SELL BAG")));
+        SellBtnText->SetColorAndOpacity(FLinearColor::Black);
+        SellBtn->AddChild(SellBtnText);
+        SellBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnSellButtonClicked);
+        StashSellActions->AddChildToHorizontalBox(SellBtn);
+
+        SellAllBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellAllButton"));
+        UTextBlock* SellAllBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        SellAllBtnText->SetText(FText::FromString(TEXT("SELL ALL")));
+        SellAllBtnText->SetColorAndOpacity(FLinearColor::Black);
+        SellAllBtn->AddChild(SellAllBtnText);
+        SellAllBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnSellAllButtonClicked);
+        StashSellActions->AddChildToHorizontalBox(SellAllBtn);
 
         StartRaidBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("StartRaidButton"));
         UTextBlock* StartRaidText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -324,24 +361,6 @@ bool UMainGameUI::Initialize()
         ExtractBtn->AddChild(ExtractBtnText);
         ExtractBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnExtractButtonClicked);
         AddCompactAction(ExtractBtn);
-
-        // Sell Button
-        SellBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellButton"));
-        UTextBlock* SellBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-        SellBtnText->SetText(FText::FromString(TEXT("SELL BAG")));
-        SellBtnText->SetColorAndOpacity(FLinearColor::Black);
-        SellBtn->AddChild(SellBtnText);
-        SellBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnSellButtonClicked);
-        AddCompactAction(SellBtn);
-
-        // Sell All Button
-        SellAllBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellAllButton"));
-        UTextBlock* SellAllBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-        SellAllBtnText->SetText(FText::FromString(TEXT("SELL ALL")));
-        SellAllBtnText->SetColorAndOpacity(FLinearColor::Black);
-        SellAllBtn->AddChild(SellAllBtnText);
-        SellAllBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnSellAllButtonClicked);
-        AddCompactAction(SellAllBtn);
 
         // Combat action buttons
         BangBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("BangButton"));
@@ -572,8 +591,41 @@ void UMainGameUI::UpdateActionAvailability()
         StashBtn->SetIsEnabled(!bInRaid);
     }
     if (ExtractBtn) ExtractBtn->SetIsEnabled(bAtExtractionPoint && !bInCombat);
-    if (SellBtn) SellBtn->SetIsEnabled(bInRaid && !bInCombat);
-    if (SellAllBtn) SellAllBtn->SetIsEnabled(bInRaid && !bInCombat);
+    const bool bCanSell = GM && !bInRaid;
+    if (SellBtn)
+    {
+        SellBtn->SetVisibility(bCanSell ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+        SellBtn->SetIsEnabled(bCanSell);
+    }
+    if (SellAllBtn)
+    {
+        SellAllBtn->SetVisibility(bCanSell ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+        SellAllBtn->SetIsEnabled(bCanSell);
+    }
+    if (RetirementAccountPanel)
+    {
+        RetirementAccountPanel->SetVisibility(bCanSell ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    }
+    if (bCanSell)
+    {
+        const float RetirementProgress = FMath::Clamp(
+            static_cast<float>(GM->RetirementBalance) / static_cast<float>(AGridGameMode::RetirementGoal), 0.0f, 1.0f);
+        if (RetirementBalanceText)
+        {
+            RetirementBalanceText->SetText(FText::Format(
+                FText::FromString(TEXT("{0} / {1}")),
+                FText::AsNumber(GM->RetirementBalance),
+                FText::AsNumber(AGridGameMode::RetirementGoal)));
+        }
+        if (RetirementStatusText)
+        {
+            RetirementStatusText->SetText(FText::FromString(
+                GM->RetirementBalance >= AGridGameMode::RetirementGoal
+                    ? TEXT("RETIREMENT READY")
+                    : TEXT("SALE PROCEEDS AUTO-DEPOSIT")));
+        }
+        if (RetirementProgressBar) RetirementProgressBar->SetPercent(RetirementProgress);
+    }
     if (BangBtn) BangBtn->SetIsEnabled(bInCombat);
     if (ReloadBtn) ReloadBtn->SetIsEnabled(bInRaid && !bEnemyAmbush);
     if (ApproachBtn) ApproachBtn->SetVisibility(ESlateVisibility::Collapsed);
@@ -1255,7 +1307,7 @@ void UMainGameUI::OnSellButtonClicked()
         QueueEventNotification(TEXT("매복 중에는 판매할 수 없습니다."));
         return;
     }
-    if (GM && GM->RaidState == ERaidState::InRaid && GM->InventoryComponent && GM->ItemDataTable)
+    if (GM && GM->RaidState != ERaidState::InRaid && GM->InventoryComponent && GM->ItemDataTable)
     {
         int32 TotalValue = 0;
         TArray<TPair<FName, int32>> SellableItems;
@@ -1281,6 +1333,9 @@ void UMainGameUI::OnSellButtonClicked()
         if (TotalValue > 0)
         {
             GM->AddScore(TotalValue);
+            GM->RetirementBalance += TotalValue;
+            GM->SaveStash();
+            UpdateActionAvailability();
         }
     }
 }
@@ -1288,7 +1343,7 @@ void UMainGameUI::OnSellButtonClicked()
 void UMainGameUI::OnSellAllButtonClicked()
 {
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
-    if (!GM || GM->RaidState != ERaidState::InRaid || !GM->ItemDataTable) return;
+    if (!GM || GM->RaidState == ERaidState::InRaid || !GM->ItemDataTable) return;
 
     if (GM->PlayerPosture == EPlayerRaidPosture::Ambushing ||
         (GM->EnemyManagerComponent && GM->EnemyManagerComponent->HasActiveAmbushReaction()))
@@ -1331,6 +1386,9 @@ void UMainGameUI::OnSellAllButtonClicked()
     if (TotalValue > 0)
     {
         GM->AddScore(TotalValue);
+        GM->RetirementBalance += TotalValue;
+        GM->SaveStash();
+        UpdateActionAvailability();
     }
 }
 

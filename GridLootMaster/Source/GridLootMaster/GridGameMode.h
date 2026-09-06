@@ -38,6 +38,8 @@ class GRIDLOOTMASTER_API AGridGameMode : public AGameModeBase
     GENERATED_BODY()
     
 public:
+    static constexpr int64 RetirementGoal = 5000000;
+
     AGridGameMode();
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Map")
@@ -219,6 +221,9 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stash")
     FString StashSaveSlot;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Progression")
+    int64 RetirementBalance = 0;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Equipment")
     class UEquipmentComponent* EquipmentComponent;
