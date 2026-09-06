@@ -132,6 +132,7 @@ bool UMainGameUI::Initialize()
         const FString BackgroundDirectory = FPaths::ProjectDir() + TEXT("RawAssets/Backgrounds/");
         BGStashTexture = LoadRawBackgroundTexture(BackgroundDirectory + TEXT("BG_Stash.png"), TEXT("BG_Stash"));
         BGRaidTexture = LoadRawBackgroundTexture(BackgroundDirectory + TEXT("BG_Raid.png"), TEXT("BG_Raid"));
+        BGEndingTexture = LoadRawBackgroundTexture(BackgroundDirectory + TEXT("BG_Ending.png"), TEXT("BG_Ending"));
 
         // 2. 전체 레이아웃 (가로 3분할)
         UHorizontalBox* HBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("MainLayout"));
@@ -328,6 +329,15 @@ bool UMainGameUI::Initialize()
 
         RetirementProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("RetirementProgressBar"));
         RetirementAccountPanel->AddChildToVerticalBox(RetirementProgressBar);
+
+        RetirementButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RetirementButton"));
+        UTextBlock* RetirementButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        RetirementButtonText->SetText(FText::FromString(TEXT("RETIRE")));
+        RetirementButtonText->SetColorAndOpacity(TacticalTextPrimary);
+        RetirementButton->AddChild(RetirementButtonText);
+        RetirementButton->OnClicked.AddDynamic(this, &UMainGameUI::OnRetirementClicked);
+        StyleTacticalButton(RetirementButton, true);
+        RetirementAccountPanel->AddChildToVerticalBox(RetirementButton);
 
         StashBoard = WidgetTree->ConstructWidget<UGridBoardWidget>(UGridBoardWidget::StaticClass(), TEXT("StashBoard"));
         UVerticalBoxSlot* StashBoardSlot = StashPanel->AddChildToVerticalBox(StashBoard);
@@ -573,6 +583,60 @@ bool UMainGameUI::Initialize()
         ++ActionIndex;
 #endif
 
+        RetirementEndingOverlay = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RetirementEndingOverlay"));
+        RetirementEndingOverlay->SetVisibility(ESlateVisibility::Collapsed);
+        UCanvasPanelSlot* EndingOverlaySlot = RootCanvas->AddChildToCanvas(RetirementEndingOverlay);
+        EndingOverlaySlot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
+        EndingOverlaySlot->SetOffsets(FMargin(0.0f));
+        EndingOverlaySlot->SetZOrder(1000);
+
+        UImage* EndingImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("RetirementEndingImage"));
+        EndingImage->SetVisibility(ESlateVisibility::HitTestInvisible);
+        if (BGEndingTexture)
+        {
+            EndingImage->SetBrushFromTexture(BGEndingTexture, true);
+        }
+        UCanvasPanelSlot* EndingImageSlot = RetirementEndingOverlay->AddChildToCanvas(EndingImage);
+        EndingImageSlot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
+        EndingImageSlot->SetOffsets(FMargin(0.0f));
+
+        UBorder* EndingDimmer = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RetirementEndingDimmer"));
+        EndingDimmer->SetBrushColor(FLinearColor(0.015f, 0.02f, 0.025f, BGEndingTexture ? 0.55f : 0.95f));
+        UCanvasPanelSlot* EndingDimmerSlot = RetirementEndingOverlay->AddChildToCanvas(EndingDimmer);
+        EndingDimmerSlot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
+        EndingDimmerSlot->SetOffsets(FMargin(0.0f));
+
+        UVerticalBox* EndingContent = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RetirementEndingContent"));
+        UCanvasPanelSlot* EndingContentSlot = RetirementEndingOverlay->AddChildToCanvas(EndingContent);
+        EndingContentSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+        EndingContentSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+        EndingContentSlot->SetSize(FVector2D(440.0f, 170.0f));
+
+        UTextBlock* EndingTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        EndingTitle->SetText(FText::FromString(TEXT("RETIREMENT COMPLETE")));
+        EndingTitle->SetColorAndOpacity(TacticalTextPrimary);
+        FSlateFontInfo EndingTitleFont = EndingTitle->GetFont();
+        EndingTitleFont.Size = 26;
+        EndingTitle->SetFont(EndingTitleFont);
+        EndingTitle->SetJustification(ETextJustify::Center);
+        EndingContent->AddChildToVerticalBox(EndingTitle);
+
+        UTextBlock* EndingSubtitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        EndingSubtitle->SetText(FText::FromString(TEXT("YOU MADE IT OUT")));
+        EndingSubtitle->SetColorAndOpacity(TacticalTextSecondary);
+        EndingSubtitle->SetJustification(ETextJustify::Center);
+        EndingContent->AddChildToVerticalBox(EndingSubtitle);
+
+        RetirementReturnButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RetirementReturnButton"));
+        UTextBlock* RetirementReturnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+        RetirementReturnText->SetText(FText::FromString(TEXT("RETURN TO STASH")));
+        RetirementReturnText->SetColorAndOpacity(TacticalTextPrimary);
+        RetirementReturnButton->AddChild(RetirementReturnText);
+        RetirementReturnButton->OnClicked.AddDynamic(this, &UMainGameUI::OnRetirementReturnClicked);
+        StyleTacticalButton(RetirementReturnButton, true);
+        UVerticalBoxSlot* ReturnButtonSlot = EndingContent->AddChildToVerticalBox(RetirementReturnButton);
+        ReturnButtonSlot->SetPadding(FMargin(0.0f, 20.0f, 0.0f, 0.0f));
+
         // --- 인벤토리/장비 컴포넌트 연결 ---
         if (GM)
         {
@@ -756,6 +820,11 @@ void UMainGameUI::UpdateActionAvailability()
     if (RetirementAccountPanel)
     {
         RetirementAccountPanel->SetVisibility(bCanSell ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    }
+    if (RetirementButton)
+    {
+        RetirementButton->SetVisibility(bCanSell ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+        RetirementButton->SetIsEnabled(bCanSell && GM->RetirementBalance >= AGridGameMode::RetirementGoal);
     }
     if (bCanSell)
     {
@@ -1554,6 +1623,29 @@ void UMainGameUI::OnSellAllButtonClicked()
         GM->SaveStash();
         UpdateActionAvailability();
     }
+}
+
+void UMainGameUI::OnRetirementClicked()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (!GM || GM->RaidState == ERaidState::InRaid || GM->RetirementBalance < AGridGameMode::RetirementGoal)
+    {
+        return;
+    }
+
+    if (RetirementEndingOverlay)
+    {
+        RetirementEndingOverlay->SetVisibility(ESlateVisibility::Visible);
+    }
+}
+
+void UMainGameUI::OnRetirementReturnClicked()
+{
+    if (RetirementEndingOverlay)
+    {
+        RetirementEndingOverlay->SetVisibility(ESlateVisibility::Collapsed);
+    }
+    UpdateActionAvailability();
 }
 
 void UMainGameUI::OnBangButtonClicked()

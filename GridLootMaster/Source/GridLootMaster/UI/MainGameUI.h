@@ -58,6 +58,12 @@ public:
     void UpdateBackgroundForPhase();
 
     UFUNCTION()
+    void OnRetirementClicked();
+
+    UFUNCTION()
+    void OnRetirementReturnClicked();
+
+    UFUNCTION()
     void UpdateEquipmentSlotSizes();
 
     UFUNCTION(BlueprintCallable, Category = "Game")
@@ -148,6 +154,12 @@ public:
     UTexture2D* BGRaidTexture;
 
     UPROPERTY()
+    UTexture2D* BGEndingTexture;
+
+    UPROPERTY()
+    class UCanvasPanel* RetirementEndingOverlay;
+
+    UPROPERTY()
     class UWidgetSwitcher* RightPanelSwitcher;
 
     UPROPERTY()
@@ -170,6 +182,12 @@ public:
 
     UPROPERTY()
     UProgressBar* RetirementProgressBar;
+
+    UPROPERTY()
+    class UButton* RetirementButton;
+
+    UPROPERTY()
+    class UButton* RetirementReturnButton;
 
     UPROPERTY()
     class UButton* ToggleModeButton;
