@@ -37,6 +37,38 @@
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
+#include "Styling/SlateBrush.h"
+#include "Styling/SlateTypes.h"
+
+namespace
+{
+    const FLinearColor TacticalTextPrimary(0.91f, 0.94f, 0.97f, 1.0f);
+    const FLinearColor TacticalTextSecondary(0.56f, 0.62f, 0.68f, 1.0f);
+
+    FSlateBrush MakeTacticalBrush(const FLinearColor& Color)
+    {
+        FSlateBrush Brush;
+        Brush.DrawAs = ESlateBrushDrawType::Box;
+        Brush.TintColor = FSlateColor(Color);
+        Brush.Margin = FMargin(0.08f);
+        return Brush;
+    }
+
+    void StyleTacticalButton(UButton* Button, bool bPrimary = false, bool bWarning = false)
+    {
+        if (!Button) return;
+
+        const FLinearColor Normal = bPrimary ? FLinearColor(0.08f, 0.28f, 0.34f, 1.0f)
+            : bWarning ? FLinearColor(0.28f, 0.22f, 0.12f, 1.0f)
+            : FLinearColor(0.09f, 0.13f, 0.17f, 1.0f);
+        FButtonStyle Style;
+        Style.Normal = MakeTacticalBrush(Normal);
+        Style.Hovered = MakeTacticalBrush(Normal + FLinearColor(0.06f, 0.07f, 0.08f, 0.0f));
+        Style.Pressed = MakeTacticalBrush(FLinearColor(0.04f, 0.06f, 0.08f, 1.0f));
+        Style.Disabled = MakeTacticalBrush(FLinearColor(0.07f, 0.08f, 0.09f, 0.75f));
+        Button->SetStyle(Style);
+    }
+}
 
 bool UMainGameUI::Initialize()
 {
@@ -69,6 +101,9 @@ bool UMainGameUI::Initialize()
             SBox->SetHeightOverride(Height);
             SBox->AddChild(OutSlot);
 
+            if (SlotID == TEXT("Rig")) RigSlotSizeBox = SBox;
+            else if (SlotID == TEXT("Backpack")) BackpackSlotSizeBox = SBox;
+
             if (GM && GM->EquipmentComponent)
             {
                 GM->EquipmentComponent->OnEquipmentChanged.AddDynamic(OutSlot, &UEquipmentSlotWidget::OnEquipmentChanged);
@@ -84,10 +119,12 @@ bool UMainGameUI::Initialize()
             VSlot->SetPadding(FMargin(0, 0, 0, PaddingBottom));
         };
 
-        auto AddToHorizontal = [](UHorizontalBox* Parent, UWidget* Child, float PaddingRight = 10.0f) {
+        auto AddToHorizontal = [](UHorizontalBox* Parent, UWidget* Child, float PaddingRight = 10.0f,
+            EVerticalAlignment VerticalAlignment = VAlign_Fill) {
             UHorizontalBoxSlot* HSlot = Parent->AddChildToHorizontalBox(Child);
             HSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
             HSlot->SetPadding(FMargin(0, 0, PaddingRight, 0));
+            HSlot->SetVerticalAlignment(VerticalAlignment);
         };
 
         // === 1. 왼쪽 패널 (캐릭터 장비 슬롯) ===
@@ -110,7 +147,7 @@ bool UMainGameUI::Initialize()
         // 1. Rig Row
         UHorizontalBox* RigRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
         AddToVertical(MiddlePanel, RigRow, 20.0f);
-        AddToHorizontal(RigRow, CreateEquipSlotEx(RigSlot, TEXT("Rig"), EItemCategory::Rig, TEXT("Chest Rig"), 128.0f, 64.0f)); // 2x1 장비 슬롯
+        AddToHorizontal(RigRow, CreateEquipSlotEx(RigSlot, TEXT("Rig"), EItemCategory::Rig, TEXT("Chest Rig"), 128.0f, 128.0f), 10.0f, VAlign_Top); // 2x2 장비 슬롯
         RigBoard = WidgetTree->ConstructWidget<USectionedStorageWidget>(USectionedStorageWidget::StaticClass(), TEXT("RigBoard"));
         AddToHorizontal(RigRow, RigBoard);
 
@@ -127,7 +164,7 @@ bool UMainGameUI::Initialize()
         // 3. Backpack Row
         UHorizontalBox* BackpackRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
         AddToVertical(MiddlePanel, BackpackRow, 20.0f);
-        AddToHorizontal(BackpackRow, CreateEquipSlotEx(BackpackSlot, TEXT("Backpack"), EItemCategory::Backpack, TEXT("Backpack"), 128.0f, 192.0f));
+        AddToHorizontal(BackpackRow, CreateEquipSlotEx(BackpackSlot, TEXT("Backpack"), EItemCategory::Backpack, TEXT("Backpack"), 128.0f, 192.0f), 10.0f, VAlign_Top);
         GridBoard = WidgetTree->ConstructWidget<USectionedStorageWidget>(USectionedStorageWidget::StaticClass(), TEXT("GridBoard"));
         AddToHorizontal(BackpackRow, GridBoard);
 
@@ -138,6 +175,12 @@ bool UMainGameUI::Initialize()
         SafeBoxBoard = WidgetTree->ConstructWidget<UGridBoardWidget>(UGridBoardWidget::StaticClass(), TEXT("SafeBoxBoard"));
         AddToHorizontal(SafeBoxRow, SafeBoxBoard);
 
+        if (GM && GM->EquipmentComponent)
+        {
+            GM->EquipmentComponent->OnEquipmentChanged.AddUniqueDynamic(this, &UMainGameUI::UpdateEquipmentSlotSizes);
+            UpdateEquipmentSlotSizes();
+        }
+
         // Toggle 버튼 (상단 중앙 쯤 표시 배치)
         ToggleModeButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ToggleModeButton"));
         UTextBlock* ToggleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -147,7 +190,8 @@ bool UMainGameUI::Initialize()
         FSlateFontInfo ToggleFont = ToggleText->GetFont();
         ToggleFont.Size = 16; 
         ToggleText->SetFont(ToggleFont);
-        ToggleText->SetColorAndOpacity(FLinearColor::Black);
+        ToggleText->SetColorAndOpacity(TacticalTextPrimary);
+        StyleTacticalButton(ToggleModeButton);
         
         ToggleModeButton->AddChild(ToggleText);
         ToggleModeButton->OnClicked.AddDynamic(this, &UMainGameUI::OnToggleModeClicked);
@@ -202,20 +246,34 @@ bool UMainGameUI::Initialize()
 
         UTextBlock* StashTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         StashTitle->SetText(FText::FromString(TEXT("STASH")));
+        StashTitle->SetColorAndOpacity(TacticalTextPrimary);
+        FSlateFontInfo StashTitleFont = StashTitle->GetFont();
+        StashTitleFont.Size = 20;
+        StashTitle->SetFont(StashTitleFont);
         StashPanel->AddChildToVerticalBox(StashTitle);
 
         RetirementAccountPanel = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RetirementAccountPanel"));
-        StashPanel->AddChildToVerticalBox(RetirementAccountPanel);
+        UBorder* RetirementFrame = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RetirementFrame"));
+        RetirementFrame->SetBrushColor(FLinearColor(0.07f, 0.10f, 0.13f, 1.0f));
+        RetirementFrame->SetPadding(FMargin(10.0f, 8.0f));
+        RetirementFrame->AddChild(RetirementAccountPanel);
+        StashPanel->AddChildToVerticalBox(RetirementFrame);
 
         UTextBlock* RetirementTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         RetirementTitle->SetText(FText::FromString(TEXT("RETIREMENT ACCOUNT")));
+        RetirementTitle->SetColorAndOpacity(TacticalTextSecondary);
         RetirementAccountPanel->AddChildToVerticalBox(RetirementTitle);
 
         RetirementBalanceText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("RetirementBalanceText"));
+        RetirementBalanceText->SetColorAndOpacity(TacticalTextPrimary);
+        FSlateFontInfo RetirementBalanceFont = RetirementBalanceText->GetFont();
+        RetirementBalanceFont.Size = 18;
+        RetirementBalanceText->SetFont(RetirementBalanceFont);
         RetirementAccountPanel->AddChildToVerticalBox(RetirementBalanceText);
 
         RetirementStatusText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("RetirementStatusText"));
         RetirementStatusText->SetText(FText::FromString(TEXT("SALE PROCEEDS AUTO-DEPOSIT")));
+        RetirementStatusText->SetColorAndOpacity(TacticalTextSecondary);
         RetirementAccountPanel->AddChildToVerticalBox(RetirementStatusText);
 
         RetirementProgressBar = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("RetirementProgressBar"));
@@ -232,25 +290,28 @@ bool UMainGameUI::Initialize()
         SellBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellButton"));
         UTextBlock* SellBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         SellBtnText->SetText(FText::FromString(TEXT("SELL BAG")));
-        SellBtnText->SetColorAndOpacity(FLinearColor::Black);
+        SellBtnText->SetColorAndOpacity(TacticalTextPrimary);
         SellBtn->AddChild(SellBtnText);
         SellBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnSellButtonClicked);
+        StyleTacticalButton(SellBtn);
         StashSellActions->AddChildToHorizontalBox(SellBtn);
 
         SellAllBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SellAllButton"));
         UTextBlock* SellAllBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         SellAllBtnText->SetText(FText::FromString(TEXT("SELL ALL")));
-        SellAllBtnText->SetColorAndOpacity(FLinearColor::Black);
+        SellAllBtnText->SetColorAndOpacity(TacticalTextPrimary);
         SellAllBtn->AddChild(SellAllBtnText);
         SellAllBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnSellAllButtonClicked);
+        StyleTacticalButton(SellAllBtn, false, true);
         StashSellActions->AddChildToHorizontalBox(SellAllBtn);
 
         StartRaidBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("StartRaidButton"));
         UTextBlock* StartRaidText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         StartRaidText->SetText(FText::FromString(TEXT("START RAID")));
-        StartRaidText->SetColorAndOpacity(FLinearColor::Black);
+        StartRaidText->SetColorAndOpacity(TacticalTextPrimary);
         StartRaidBtn->AddChild(StartRaidText);
         StartRaidBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnStartRaidClicked);
+        StyleTacticalButton(StartRaidBtn, true);
         StashPanel->AddChildToVerticalBox(StartRaidBtn);
 
         TimerText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("TimerText"));
@@ -299,7 +360,7 @@ bool UMainGameUI::Initialize()
         FSlateFontInfo StatusFont = StatusPanelText->GetFont();
         StatusFont.Size = 14;
         StatusPanelText->SetFont(StatusFont);
-        UBorder* StatusPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("StatusPanel"));
+        StatusPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("StatusPanel"));
         StatusPanel->SetBrushColor(FLinearColor(0.01f, 0.02f, 0.03f, 0.8f));
         StatusPanel->SetPadding(FMargin(10.0f));
         StatusPanel->AddChild(StatusPanelText);
@@ -316,9 +377,9 @@ bool UMainGameUI::Initialize()
         SpacerSlot1->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
         SpacerSlot1->SetPadding(FMargin(0, 20));
 
-        UTextBlock* PoolTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-        PoolTitle->SetText(FText::FromString(TEXT("Loot Container")));
-        RightPanel->AddChildToVerticalBox(PoolTitle);
+        LootContainerTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("LootContainerTitle"));
+        LootContainerTitle->SetText(FText::FromString(TEXT("Loot Container")));
+        RightPanel->AddChildToVerticalBox(LootContainerTitle);
 
         ContainerBoard = WidgetTree->ConstructWidget<UGridBoardWidget>(UGridBoardWidget::StaticClass(), TEXT("ContainerBoard"));
         UVerticalBoxSlot* PoolSlot = RightPanel->AddChildToVerticalBox(ContainerBoard);
@@ -334,6 +395,7 @@ bool UMainGameUI::Initialize()
         {
             if (Button && ActionGrid)
             {
+                StyleTacticalButton(Button);
                 ActionGrid->AddChildToUniformGrid(Button, ActionIndex / 2, ActionIndex % 2);
                 ++ActionIndex;
             }
@@ -342,14 +404,14 @@ bool UMainGameUI::Initialize()
         SearchBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SearchBtn"));
         SearchBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         SearchBtnText->SetText(FText::FromString(TEXT("SEARCH CONTAINER")));
-        SearchBtnText->SetColorAndOpacity(FLinearColor::Black);
+        SearchBtnText->SetColorAndOpacity(TacticalTextPrimary);
         SearchBtn->AddChild(SearchBtnText);
         AddCompactAction(SearchBtn);
 
         StashBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("StashButton"));
         UTextBlock* StashBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         StashBtnText->SetText(FText::FromString(TEXT("OPEN STASH")));
-        StashBtnText->SetColorAndOpacity(FLinearColor::Black);
+        StashBtnText->SetColorAndOpacity(TacticalTextPrimary);
         StashBtn->AddChild(StashBtnText);
         StashBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnStashButtonClicked);
         AddCompactAction(StashBtn);
@@ -357,7 +419,7 @@ bool UMainGameUI::Initialize()
         ExtractBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ExtractButton"));
         UTextBlock* ExtractBtnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         ExtractBtnText->SetText(FText::FromString(TEXT("EXTRACT RAID")));
-        ExtractBtnText->SetColorAndOpacity(FLinearColor::Black);
+        ExtractBtnText->SetColorAndOpacity(TacticalTextPrimary);
         ExtractBtn->AddChild(ExtractBtnText);
         ExtractBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnExtractButtonClicked);
         AddCompactAction(ExtractBtn);
@@ -366,7 +428,7 @@ bool UMainGameUI::Initialize()
         BangBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("BangButton"));
         BangButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         BangButtonText->SetText(FText::FromString(TEXT("FIRE")));
-        BangButtonText->SetColorAndOpacity(FLinearColor::Black);
+        BangButtonText->SetColorAndOpacity(TacticalTextPrimary);
         BangBtn->AddChild(BangButtonText);
         BangBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnBangButtonClicked);
         AddCompactAction(BangBtn);
@@ -374,7 +436,7 @@ bool UMainGameUI::Initialize()
         ReloadBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("ReloadButton"));
         UTextBlock* ReloadText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         ReloadText->SetText(FText::FromString(TEXT("RELOAD")));
-        ReloadText->SetColorAndOpacity(FLinearColor::Black);
+        ReloadText->SetColorAndOpacity(TacticalTextPrimary);
         ReloadBtn->AddChild(ReloadText);
         ReloadBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnReloadButtonClicked);
         AddCompactAction(ReloadBtn);
@@ -388,7 +450,7 @@ bool UMainGameUI::Initialize()
         CombatMoveBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("CombatMoveButton"));
         UTextBlock* CombatMoveText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         CombatMoveText->SetText(FText::FromString(TEXT("MOVE")));
-        CombatMoveText->SetColorAndOpacity(FLinearColor::Black);
+        CombatMoveText->SetColorAndOpacity(TacticalTextPrimary);
         CombatMoveBtn->AddChild(CombatMoveText);
         CombatMoveBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnCombatMoveButtonClicked);
         AddCompactAction(CombatMoveBtn);
@@ -398,7 +460,7 @@ bool UMainGameUI::Initialize()
             OutButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
             UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
             Text->SetText(FText::FromString(Label));
-            Text->SetColorAndOpacity(FLinearColor::Black);
+            Text->SetColorAndOpacity(TacticalTextPrimary);
             OutButton->AddChild(Text);
             OutButton->SetVisibility(ESlateVisibility::Collapsed);
             AddCompactAction(OutButton);
@@ -417,7 +479,7 @@ bool UMainGameUI::Initialize()
         CombatFleeBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("CombatFleeButton"));
         UTextBlock* CombatFleeText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         CombatFleeText->SetText(FText::FromString(TEXT("FLEE")));
-        CombatFleeText->SetColorAndOpacity(FLinearColor::Black);
+        CombatFleeText->SetColorAndOpacity(TacticalTextPrimary);
         CombatFleeBtn->AddChild(CombatFleeText);
         CombatFleeBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnCombatFleeButtonClicked);
         AddCompactAction(CombatFleeBtn);
@@ -425,7 +487,7 @@ bool UMainGameUI::Initialize()
         PlayerAmbushBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("PlayerAmbushButton"));
         UTextBlock* PlayerAmbushText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         PlayerAmbushText->SetText(FText::FromString(TEXT("AMBUSH")));
-        PlayerAmbushText->SetColorAndOpacity(FLinearColor::Black);
+        PlayerAmbushText->SetColorAndOpacity(TacticalTextPrimary);
         PlayerAmbushBtn->AddChild(PlayerAmbushText);
         PlayerAmbushBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnPlayerAmbushButtonClicked);
         AddCompactAction(PlayerAmbushBtn);
@@ -435,7 +497,7 @@ bool UMainGameUI::Initialize()
             OutButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
             UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
             Text->SetText(FText::FromString(Label));
-            Text->SetColorAndOpacity(FLinearColor::Black);
+            Text->SetColorAndOpacity(TacticalTextPrimary);
             OutButton->AddChild(Text);
             FScriptDelegate Delegate;
             Delegate.BindUFunction(this, FunctionName);
@@ -454,7 +516,7 @@ bool UMainGameUI::Initialize()
         DebugSpawnEnemyBtn = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("DebugSpawnEnemyButton"));
         UTextBlock* DebugSpawnText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         DebugSpawnText->SetText(FText::FromString(TEXT("DEBUG SPAWN ENEMY")));
-        DebugSpawnText->SetColorAndOpacity(FLinearColor::Black);
+        DebugSpawnText->SetColorAndOpacity(TacticalTextSecondary);
         DebugSpawnEnemyBtn->AddChild(DebugSpawnText);
         DebugSpawnEnemyBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnDebugSpawnEnemyClicked);
         ActionGrid->AddChildToUniformGrid(DebugSpawnEnemyBtn, ActionIndex / 2, ActionIndex % 2);
@@ -521,6 +583,24 @@ bool UMainGameUI::Initialize()
     return true;
 }
 
+void UMainGameUI::UpdateEquipmentSlotSizes()
+{
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    if (!GM || !GM->EquipmentComponent) return;
+
+    if (RigSlotSizeBox)
+    {
+        RigSlotSizeBox->SetWidthOverride(128.0f);
+        RigSlotSizeBox->SetHeightOverride(128.0f);
+    }
+    if (BackpackSlotSizeBox)
+    {
+        const bool bBackpackEquipped = GM->EquipmentComponent->GetEquippedItem(TEXT("Backpack")) != nullptr;
+        BackpackSlotSizeBox->SetWidthOverride(128.0f);
+        BackpackSlotSizeBox->SetHeightOverride(bBackpackEquipped ? 192.0f : 192.0f);
+    }
+}
+
 void UMainGameUI::RefreshMinimaps(UMapManagerComponent* InMapManager)
 {
     AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
@@ -573,6 +653,7 @@ void UMainGameUI::UpdateActionAvailability()
     const bool bInCombat = bInRaid && GM->CombatComponent && GM->CombatComponent->bHasActiveEnemy;
     const bool bPlayerAmbushing = bInRaid && GM->PlayerPosture == EPlayerRaidPosture::Ambushing;
     const bool bEnemyAmbush = bInRaid && GM->EnemyManagerComponent && GM->EnemyManagerComponent->HasActiveAmbushReaction();
+    if (StatusPanel) StatusPanel->SetVisibility(bInRaid ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
     FName AmbushTargetID = NAME_None;
     const bool bHasAmbushTarget = bPlayerAmbushing && GM->EnemyManagerComponent &&
         GM->EnemyManagerComponent->FindPlayerAmbushTarget(AmbushTargetID);
@@ -666,7 +747,13 @@ void UMainGameUI::UpdateActionAvailability()
     {
         CompactMinimapUI->AdvanceButton->SetIsEnabled(bInRaid && !bInCombat && CompactMinimapUI->CurrentPath.Num() > 0);
     }
-    if (CompactMinimapUI) CompactMinimapUI->SetVisibility(bInRaid ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
+    const bool bFullMapVisible = RightPanelSwitcher && RightPanelSwitcher->GetActiveWidgetIndex() == 1;
+    if (CompactMinimapUI)
+    {
+        CompactMinimapUI->SetVisibility(bInRaid && !bFullMapVisible
+            ? ESlateVisibility::Visible
+            : ESlateVisibility::Hidden);
+    }
     if (StartRaidBtn) StartRaidBtn->SetIsEnabled(GM && GM->RaidState == ERaidState::Lobby);
     if (StashBtn) StashBtn->SetIsEnabled(GM && GM->RaidState != ERaidState::InRaid);
     if (GM && GM->RaidState == ERaidState::InRaid && RightPanelSwitcher &&
@@ -713,6 +800,7 @@ void UMainGameUI::OnToggleModeClicked()
             return;
         }
         RightPanelSwitcher->SetActiveWidgetIndex(CurrentIdx == 0 ? 1 : 0);
+        UpdateActionAvailability();
     }
 }
 
@@ -829,6 +917,12 @@ void UMainGameUI::OnSearchButtonClicked()
 void UMainGameUI::SetLootInventory(UGridInventoryComponent* Inventory)
 {
     if (!ContainerBoard || !Inventory) return;
+    if (LootContainerTitle)
+    {
+        const AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+        LootContainerTitle->SetText(FText::FromString(
+            GM && GM->HasDeadBodyAtCurrentPlayerCoord() ? TEXT("DEAD BODY") : TEXT("Loot Container")));
+    }
     ContainerBoard->InventoryComponent = Inventory;
     Inventory->OnInventoryChanged.AddUniqueDynamic(ContainerBoard, &UGridBoardWidget::RefreshGridUI);
     ContainerBoard->RefreshGridUI();
@@ -1247,13 +1341,13 @@ void UMainGameUI::AddEventLogEntry(const FString& Message)
     EventLogScrollBox->ClearChildren();
     UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
     Title->SetText(FText::FromString(TEXT("EVENT LOG")));
-    Title->SetColorAndOpacity(FLinearColor(0.7f, 0.9f, 1.0f, 1.0f));
+    Title->SetColorAndOpacity(TacticalTextSecondary);
     EventLogScrollBox->AddChild(Title);
     for (const FString& Entry : EventLogEntries)
     {
         UTextBlock* Line = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
         Line->SetText(FText::FromString(Entry));
-        Line->SetColorAndOpacity(FLinearColor::White);
+        Line->SetColorAndOpacity(TacticalTextSecondary);
         EventLogScrollBox->AddChild(Line);
     }
     EventLogScrollBox->ScrollToEnd();

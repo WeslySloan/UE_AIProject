@@ -28,14 +28,14 @@ bool UEquipmentSlotWidget::Initialize()
         WidgetTree->RootWidget = RootOverlay;
 
         BackgroundBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("BackgroundBorder"));
-        BackgroundBorder->SetBrushColor(FLinearColor(0.1f, 0.1f, 0.1f, 0.8f));
+        BackgroundBorder->SetBrushColor(FLinearColor(0.07f, 0.10f, 0.13f, 1.0f));
         UOverlaySlot* BGOvSlot = RootOverlay->AddChildToOverlay(BackgroundBorder);
         BGOvSlot->SetHorizontalAlignment(HAlign_Fill);
         BGOvSlot->SetVerticalAlignment(VAlign_Fill);
 
         SlotNameText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("SlotNameText"));
         SlotNameText->SetText(FText::FromString(SlotName));
-        SlotNameText->SetColorAndOpacity(FLinearColor(0.5f, 0.5f, 0.5f, 1.0f));
+        SlotNameText->SetColorAndOpacity(FLinearColor(0.56f, 0.62f, 0.68f, 1.0f));
         SlotNameText->SetJustification(ETextJustify::Center);
         UOverlaySlot* TextOvSlot = RootOverlay->AddChildToOverlay(SlotNameText);
         TextOvSlot->SetHorizontalAlignment(HAlign_Center);
@@ -141,7 +141,7 @@ void UEquipmentSlotWidget::SetHighlight(bool bActive)
         }
         else
         {
-            BackgroundBorder->SetBrushColor(FLinearColor(0.1f, 0.1f, 0.1f, 0.8f)); // Normal (Dark Gray)
+            BackgroundBorder->SetBrushColor(FLinearColor(0.07f, 0.10f, 0.13f, 1.0f)); // Normal (Dark Gray)
         }
     }
 }
@@ -184,7 +184,7 @@ void UEquipmentSlotWidget::NativeOnDragLeave(const FDragDropEvent& InDragDropEve
     
     if (BackgroundBorder)
     {
-        BackgroundBorder->SetBrushColor(FLinearColor(0.1f, 0.1f, 0.1f, 0.8f));
+        BackgroundBorder->SetBrushColor(FLinearColor(0.07f, 0.10f, 0.13f, 1.0f));
     }
 }
 
@@ -192,7 +192,7 @@ bool UEquipmentSlotWidget::NativeOnDrop(const FGeometry& InGeometry, const FDrag
 {
     Super::NativeOnDrop(InGeometry, InDragDropEvent, InOperation);
 
-    if (BackgroundBorder) BackgroundBorder->SetBrushColor(FLinearColor(0.1f, 0.1f, 0.1f, 0.8f));
+    if (BackgroundBorder) BackgroundBorder->SetBrushColor(FLinearColor(0.07f, 0.10f, 0.13f, 1.0f));
 
     UItemDragDropOperation* ItemDropOp = Cast<UItemDragDropOperation>(InOperation);
     if (!ItemDropOp || !ItemDropOp->ItemObj) return false;

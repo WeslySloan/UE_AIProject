@@ -141,9 +141,9 @@ void UDraggableItemWidget::InitWidgetUI(bool bEquipped)
         
         if (UOverlaySlot* IconSlot = Cast<UOverlaySlot>(ContentOverlay->AddChild(IconImg)))
         {
-            IconSlot->SetHorizontalAlignment(HAlign_Center);
-            IconSlot->SetVerticalAlignment(VAlign_Center);
-            IconSlot->SetPadding(FMargin(5.0f));
+            IconSlot->SetHorizontalAlignment(HAlign_Fill);
+            IconSlot->SetVerticalAlignment(VAlign_Fill);
+            IconSlot->SetPadding(FMargin(3.0f));
             // IconImg->SetBrushSize(FVector2D(IconTex->GetSizeX(), IconTex->GetSizeY())); 
         }
     }

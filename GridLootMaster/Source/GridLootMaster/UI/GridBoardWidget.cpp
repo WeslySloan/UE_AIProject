@@ -36,7 +36,7 @@ bool UGridBoardWidget::Initialize()
 
         // 2. 실제 시각적인 그리드 배경
         BackgroundBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-        BackgroundBorder->SetBrushColor(FLinearColor(0.1f, 0.1f, 0.1f, 0.8f));
+        BackgroundBorder->SetBrushColor(FLinearColor(0.04f, 0.06f, 0.08f, 1.0f));
         UCanvasPanelSlot* BGSlot = GridCanvas->AddChildToCanvas(BackgroundBorder);
         BGSlot->SetPosition(FVector2D(0.0f, 0.0f));
         // 임시 크기 부여, RefreshGridUI에서 다시 맞춤
@@ -578,7 +578,7 @@ void UGridBoardWidget::RefreshGridUI()
         for (int X = 0; X < SectionSize.X; ++X)
         {
             UBorder* CellVisual = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-            CellVisual->SetBrushColor(FLinearColor(0.5f, 0.5f, 0.5f, 0.4f));
+            CellVisual->SetBrushColor(FLinearColor(0.09f, 0.12f, 0.15f, 1.0f));
             CellVisual->SetVisibility(ESlateVisibility::HitTestInvisible);
             
             UCanvasPanelSlot* CellSlot = GridCanvas->AddChildToCanvas(CellVisual);

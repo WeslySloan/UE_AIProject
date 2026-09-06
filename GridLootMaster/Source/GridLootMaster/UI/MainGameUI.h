@@ -13,6 +13,7 @@ class UEquipmentSlotWidget;
 class UScrollBox;
 class UVerticalBox;
 class UProgressBar;
+class USizeBox;
 
 UCLASS()
 class GRIDLOOTMASTER_API UMainGameUI : public UUserWidget
@@ -50,6 +51,9 @@ public:
 
     UFUNCTION()
     void UpdateActionAvailability();
+
+    UFUNCTION()
+    void UpdateEquipmentSlotSizes();
 
     UFUNCTION(BlueprintCallable, Category = "Game")
     void ShowGameResult(bool bIsWin);
@@ -187,6 +191,12 @@ public:
     UTextBlock* StatusPanelText;
 
     UPROPERTY()
+    class UBorder* StatusPanel;
+
+    UPROPERTY()
+    UTextBlock* LootContainerTitle;
+
+    UPROPERTY()
     TArray<FString> PendingEventNotifications;
 
     UPROPERTY()
@@ -207,6 +217,12 @@ public:
 
     UPROPERTY()
     UGridBoardWidget* SafeBoxBoard;
+
+    UPROPERTY()
+    class USizeBox* RigSlotSizeBox;
+
+    UPROPERTY()
+    class USizeBox* BackpackSlotSizeBox;
 
     UPROPERTY()
     USectionedStorageWidget* RigBoard;
