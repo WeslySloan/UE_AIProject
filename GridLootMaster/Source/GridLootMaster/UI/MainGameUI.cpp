@@ -22,6 +22,8 @@
 #include "Components/UniformGridPanel.h"
 #include "Components/UniformGridSlot.h"
 #include "Components/ProgressBar.h"
+#include "Components/Image.h"
+#include "Components/ScaleBox.h"
 #include "MinimapWidget.h"
 #include "GridBoardWidget.h"
 #include "SectionedStorageWidget.h"
@@ -37,6 +39,10 @@
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
+#include "Engine/Texture2D.h"
+#include "ImageUtils.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
 
@@ -68,6 +74,34 @@ namespace
         Style.Disabled = MakeTacticalBrush(FLinearColor(0.07f, 0.08f, 0.09f, 0.75f));
         Button->SetStyle(Style);
     }
+
+    UTexture2D* LoadRawBackgroundTexture(const FString& FilePath, const TCHAR* BackgroundName)
+    {
+        if (!FPaths::FileExists(FilePath))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("MainGameUI background not found: %s (%s)"), *FilePath, BackgroundName);
+            return nullptr;
+        }
+
+        TArray<uint8> RawFileData;
+        if (!FFileHelper::LoadFileToArray(RawFileData, *FilePath))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("MainGameUI background failed to read: %s (%s)"), *FilePath, BackgroundName);
+            return nullptr;
+        }
+
+        UTexture2D* LoadedTexture = FImageUtils::ImportBufferAsTexture2D(RawFileData);
+        if (!LoadedTexture)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("MainGameUI background failed to decode: %s (%s)"), *FilePath, BackgroundName);
+            return nullptr;
+        }
+
+        LoadedTexture->CompressionSettings = TC_EditorIcon;
+        LoadedTexture->SRGB = true;
+        LoadedTexture->UpdateResource();
+        return LoadedTexture;
+    }
 }
 
 bool UMainGameUI::Initialize()
@@ -82,6 +116,22 @@ bool UMainGameUI::Initialize()
         // 1. Root: Canvas Panel
         UCanvasPanel* RootCanvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RootCanvas"));
         WidgetTree->RootWidget = RootCanvas;
+
+        // 배경은 기존 UI와 입력을 가리지 않는 최하단 visual layer다.
+        UScaleBox* BackgroundScaleBox = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("BackgroundScaleBox"));
+        BackgroundScaleBox->SetStretch(EStretch::ScaleToFill);
+        BackgroundScaleBox->SetVisibility(ESlateVisibility::HitTestInvisible);
+        BackgroundImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("BackgroundImage"));
+        BackgroundImage->SetVisibility(ESlateVisibility::HitTestInvisible);
+        BackgroundScaleBox->AddChild(BackgroundImage);
+        UCanvasPanelSlot* BackgroundSlot = RootCanvas->AddChildToCanvas(BackgroundScaleBox);
+        BackgroundSlot->SetAnchors(FAnchors(0.0f, 0.0f, 1.0f, 1.0f));
+        BackgroundSlot->SetOffsets(FMargin(0.0f));
+        BackgroundSlot->SetZOrder(-100);
+
+        const FString BackgroundDirectory = FPaths::ProjectDir() + TEXT("RawAssets/Backgrounds/");
+        BGStashTexture = LoadRawBackgroundTexture(BackgroundDirectory + TEXT("BG_Stash.png"), TEXT("BG_Stash"));
+        BGRaidTexture = LoadRawBackgroundTexture(BackgroundDirectory + TEXT("BG_Raid.png"), TEXT("BG_Raid"));
 
         // 2. 전체 레이아웃 (가로 3분할)
         UHorizontalBox* HBox = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("MainLayout"));
@@ -575,12 +625,32 @@ bool UMainGameUI::Initialize()
 
             GM->OnGameStateChanged.AddDynamic(this, &UMainGameUI::UpdateActionAvailability);
             GM->OnGameStateChanged.AddDynamic(this, &UMainGameUI::UpdateCombatUI);
+            GM->OnGameStateChanged.AddUniqueDynamic(this, &UMainGameUI::UpdateBackgroundForPhase);
             UpdateActionAvailability();
+            UpdateBackgroundForPhase();
 
             SearchBtn->OnClicked.AddDynamic(this, &UMainGameUI::OnSearchButtonClicked);
         }
     }
     return true;
+}
+
+void UMainGameUI::UpdateBackgroundForPhase()
+{
+    if (!BackgroundImage) return;
+
+    AGridGameMode* GM = Cast<AGridGameMode>(UGameplayStatics::GetGameMode(this));
+    const bool bInRaid = GM && GM->RaidState == ERaidState::InRaid;
+    UTexture2D* DesiredTexture = bInRaid ? BGRaidTexture : BGStashTexture;
+    if (DesiredTexture)
+    {
+        BackgroundImage->SetBrushFromTexture(DesiredTexture, true);
+        BackgroundImage->SetVisibility(ESlateVisibility::HitTestInvisible);
+    }
+    else
+    {
+        BackgroundImage->SetVisibility(ESlateVisibility::Hidden);
+    }
 }
 
 void UMainGameUI::UpdateEquipmentSlotSizes()

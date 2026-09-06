@@ -14,6 +14,8 @@ class UScrollBox;
 class UVerticalBox;
 class UProgressBar;
 class USizeBox;
+class UImage;
+class UTexture2D;
 
 UCLASS()
 class GRIDLOOTMASTER_API UMainGameUI : public UUserWidget
@@ -51,6 +53,9 @@ public:
 
     UFUNCTION()
     void UpdateActionAvailability();
+
+    UFUNCTION()
+    void UpdateBackgroundForPhase();
 
     UFUNCTION()
     void UpdateEquipmentSlotSizes();
@@ -133,6 +138,15 @@ public:
     void RefreshEnemyMarkers();
 
 public:
+    UPROPERTY()
+    UImage* BackgroundImage;
+
+    UPROPERTY()
+    UTexture2D* BGStashTexture;
+
+    UPROPERTY()
+    UTexture2D* BGRaidTexture;
+
     UPROPERTY()
     class UWidgetSwitcher* RightPanelSwitcher;
 

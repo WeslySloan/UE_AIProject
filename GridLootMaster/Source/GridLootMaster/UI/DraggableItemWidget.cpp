@@ -133,18 +133,21 @@ void UDraggableItemWidget::InitWidgetUI(bool bEquipped)
     ContentOverlay->SetClipping(EWidgetClipping::ClipToBounds);
     BG->AddChild(ContentOverlay);
     
-    // 아이콘 표시 (우선)
-    if (UTexture2D* IconTex = ItemObj->GetDynamicIcon())
+    // 미식별 아이템은 실제 아이콘을 표시하지 않는다.
+    if (ItemObj->bIsExamined)
     {
-        UImage* IconImg = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
-        IconImg->SetBrushFromTexture(IconTex);
-        
-        if (UOverlaySlot* IconSlot = Cast<UOverlaySlot>(ContentOverlay->AddChild(IconImg)))
+        if (UTexture2D* IconTex = ItemObj->GetDynamicIcon())
         {
-            IconSlot->SetHorizontalAlignment(HAlign_Fill);
-            IconSlot->SetVerticalAlignment(VAlign_Fill);
-            IconSlot->SetPadding(FMargin(3.0f));
-            // IconImg->SetBrushSize(FVector2D(IconTex->GetSizeX(), IconTex->GetSizeY())); 
+            UImage* IconImg = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass());
+            IconImg->SetBrushFromTexture(IconTex);
+
+            if (UOverlaySlot* IconSlot = Cast<UOverlaySlot>(ContentOverlay->AddChild(IconImg)))
+            {
+                IconSlot->SetHorizontalAlignment(HAlign_Fill);
+                IconSlot->SetVerticalAlignment(VAlign_Fill);
+                IconSlot->SetPadding(FMargin(3.0f));
+                // IconImg->SetBrushSize(FVector2D(IconTex->GetSizeX(), IconTex->GetSizeY()));
+            }
         }
     }
 
